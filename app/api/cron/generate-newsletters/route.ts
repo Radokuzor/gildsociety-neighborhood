@@ -18,8 +18,10 @@ export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
 
-  // Also allow admin manual trigger (checks admin cookie via query param)
-  const adminToken = request.nextUrl.searchParams.get("admin_token");
+  // Also allow admin manual trigger — checks the httpOnly admin_token cookie
+  // (the query-param approach doesn't work because httpOnly cookies are not
+  //  readable by JavaScript, so the client can never populate it)
+  const adminToken = request.cookies.get("admin_token")?.value;
   const isAdmin = adminToken === process.env.ADMIN_SECRET;
   const isCron = cronSecret && authHeader === `Bearer ${cronSecret}`;
 

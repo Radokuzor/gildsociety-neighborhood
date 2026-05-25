@@ -64,8 +64,8 @@ export default function AdminDashboard({
     setGenerating(slug);
     try {
       const res = await fetch(
-        `/api/cron/generate-newsletters?neighborhood=${slug}&admin_token=${encodeURIComponent(document.cookie.match(/admin_token=([^;]+)/)?.[1] ?? "")}`,
-        { method: "GET" }
+        `/api/cron/generate-newsletters?neighborhood=${slug}`,
+        { method: "GET", credentials: "same-origin" }
       );
       const data = await res.json() as { results: Array<{ status: string; neighborhood: string }> };
       const result = data.results?.[0];
