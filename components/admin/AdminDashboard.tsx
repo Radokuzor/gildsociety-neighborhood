@@ -35,6 +35,11 @@ export default function AdminDashboard({
   const [previewIssue, setPreviewIssue] = useState<AdminIssue | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  // ── New neighborhood form ─────────────────────────────────────────────────
+  const [newHood, setNewHood] = useState({ name: "", slug: "", city: "", state: "" });
+  const [creatingHood, setCreatingHood] = useState(false);
+  const [hoodError, setHoodError] = useState<string | null>(null);
+
   function showToast(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 3500);
@@ -128,6 +133,46 @@ export default function AdminDashboard({
   async function logout() {
     await fetch("/api/admin/logout", { method: "POST" });
     router.push("/admin/login");
+  }
+
+  // Auto-generate slug from name
+  function handleNameChange(name: string) {
+    const slug = name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-");
+    setNewHood((prev) => ({ ...prev, name, slug }));
+    setHoodError(null);
+  }
+
+  async function createNeighborhood() {
+    setHoodError(null);
+    if (!newHood.name || !newHood.slug || !newHood.city || !newHood.state) {
+      setHoodError("All fields are required.");
+      return;
+    }
+    setCreatingHood(true);
+    try {
+      const res = await fetch("/api/admin/neighborhoods", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newHood),
+      });
+      const data = await res.json() as { neighborhood?: unknown; error?: string };
+      if (res.ok) {
+        showToast(`✅ "${newHood.name}" created!`);
+        setNewHood({ name: "", slug: "", city: "", state: "" });
+        router.refresh();
+      } else {
+        setHoodError(data.error ?? "Failed to create neighborhood");
+      }
+    } catch {
+      setHoodError("Request failed — check your connection");
+    } finally {
+      setCreatingHood(false);
+    }
   }
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
@@ -425,10 +470,91 @@ export default function AdminDashboard({
             </p>
           </div>
 
+          {/* ── Create new neighborhood ─────────────────────────────────── */}
+          <div className="bg-white rounded-3xl border border-gs-border p-5">
+            <p className="font-black text-gs-dark mb-1">Add neighborhood</p>
+            <p className="text-sm text-gs-medium mb-4">
+              New neighborhoods appear in the homepage selector immediately.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="text-xs font-semibold text-gs-medium uppercase tracking-wider mb-1 block">
+                  Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="Wildhorse Ranch"
+                  value={newHood.name}
+                  onChange={(e) => handleNameChange(e.target.value)}
+                  className="w-full border border-gs-border rounded-xl px-3 py-2 text-sm text-gs-dark placeholder:text-gs-light focus:outline-none focus:border-gs-red transition-colors"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gs-medium uppercase tracking-wider mb-1 block">
+                  Slug <span className="text-gs-light font-normal">(auto-generated)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="wildhorse-ranch"
+                  value={newHood.slug}
+                  onChange={(e) => {
+                    setNewHood((prev) => ({ ...prev, slug: e.target.value }));
+                    setHoodError(null);
+                  }}
+                  className="w-full border border-gs-border rounded-xl px-3 py-2 text-sm text-gs-dark placeholder:text-gs-light focus:outline-none focus:border-gs-red transition-colors font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gs-medium uppercase tracking-wider mb-1 block">
+                  City
+                </label>
+                <input
+                  type="text"
+                  placeholder="Austin"
+                  value={newHood.city}
+                  onChange={(e) => {
+                    setNewHood((prev) => ({ ...prev, city: e.target.value }));
+                    setHoodError(null);
+                  }}
+                  className="w-full border border-gs-border rounded-xl px-3 py-2 text-sm text-gs-dark placeholder:text-gs-light focus:outline-none focus:border-gs-red transition-colors"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gs-medium uppercase tracking-wider mb-1 block">
+                  State
+                </label>
+                <input
+                  type="text"
+                  placeholder="TX"
+                  maxLength={2}
+                  value={newHood.state}
+                  onChange={(e) => {
+                    setNewHood((prev) => ({ ...prev, state: e.target.value.toUpperCase() }));
+                    setHoodError(null);
+                  }}
+                  className="w-full border border-gs-border rounded-xl px-3 py-2 text-sm text-gs-dark placeholder:text-gs-light focus:outline-none focus:border-gs-red transition-colors uppercase"
+                />
+              </div>
+            </div>
+            {hoodError && (
+              <p className="text-xs text-red-600 font-semibold mb-3">⚠️ {hoodError}</p>
+            )}
+            <button
+              onClick={createNeighborhood}
+              disabled={creatingHood}
+              className="px-5 py-2 bg-gs-red text-white text-sm font-bold rounded-xl hover:bg-gs-red/90 transition-colors disabled:opacity-50 tap-none"
+            >
+              {creatingHood ? "Creating…" : "Create neighborhood →"}
+            </button>
+          </div>
+
+          {/* ── Existing neighborhoods list ─────────────────────────────── */}
           <div className="bg-white rounded-3xl border border-gs-border p-5">
             <p className="font-black text-gs-dark mb-1">Neighborhoods</p>
             <div className="space-y-2">
-              {neighborhoods.map((hood) => (
+              {neighborhoods.length === 0 ? (
+                <p className="text-sm text-gs-medium py-4 text-center">No neighborhoods yet — create one above.</p>
+              ) : neighborhoods.map((hood) => (
                 <div key={hood.id} className="flex items-center justify-between py-2 border-b border-gs-border last:border-0">
                   <div>
                     <p className="font-semibold text-gs-dark text-sm">{hood.name}</p>
