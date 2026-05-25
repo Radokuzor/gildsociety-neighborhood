@@ -1,11 +1,5 @@
 import type { NextConfig } from "next";
-import path from "path";
 
-const nextConfig: NextConfig = {
-  turbopack: {
-    // Set the workspace root to this project to avoid lockfile confusion
-    root: path.resolve(__dirname),
-  },
-};
+const nextConfig: NextConfig = {};
 
 export default nextConfig;
