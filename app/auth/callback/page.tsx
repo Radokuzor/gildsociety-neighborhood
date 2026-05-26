@@ -1,25 +1,19 @@
 "use client";
 
-/**
- * Magic-link auth callback — client-side.
- *
- * WHY CLIENT-SIDE:
- * The PKCE code verifier is stored in the browser that called signInWithOtp().
- * On mobile, email apps often open links in an in-app browser that does NOT share
- * cookies with the main browser. A server-side Route Handler reads verifier cookies
- * from the incoming request, so if the in-app browser doesn't have them it fails
- * silently and the user lands on the home page still logged-out.
- *
- * Running the exchange client-side means the Supabase JS library uses its own
- * in-memory / localStorage storage in whatever browser context the page loads in
- * — no cross-context cookie dependency.
- */
-
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
+// useSearchParams() must be inside a Suspense boundary during build.
 export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={<Spinner message="Signing you in…" />}>
+      <CallbackHandler />
+    </Suspense>
+  );
+}
+
+function CallbackHandler() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [message, setMessage] = useState("Signing you in…");
@@ -35,21 +29,23 @@ export default function AuthCallbackPage() {
     }
 
     const supabase = createClient();
-
     supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
       if (error) {
         console.error("Auth callback error:", error.message);
         setMessage("Couldn't sign you in. Please try again.");
         setTimeout(() => router.replace("/"), 2000);
       } else {
-        // Session is now active in the browser. Do a full navigation (not
-        // router.push) so the server re-renders the home page with the session.
+        // Full navigation so the server re-renders the home page with the new session.
         window.location.href = next.startsWith("/") ? next : "/";
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  return <Spinner message={message} />;
+}
+
+function Spinner({ message }: { message: string }) {
   return (
     <div
       style={{
@@ -63,7 +59,6 @@ export default function AuthCallbackPage() {
         gap: "16px",
       }}
     >
-      {/* Spinner */}
       <div
         style={{
           width: 40,
@@ -75,15 +70,7 @@ export default function AuthCallbackPage() {
         }}
       />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-
-      <p
-        style={{
-          margin: 0,
-          fontSize: 15,
-          color: "#767676",
-          fontWeight: 500,
-        }}
-      >
+      <p style={{ margin: 0, fontSize: 15, color: "#767676", fontWeight: 500 }}>
         {message}
       </p>
     </div>
