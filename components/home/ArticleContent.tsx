@@ -96,6 +96,18 @@ export default function ArticleContent({
 
       {/* ── ABOVE PAYWALL ──────────────────────────────────────────────────── */}
 
+      {/* ── HOOK LINE — matches email opening ──────────────────────────────── */}
+      {content.opening && (
+        <motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0 }}
+          className="font-serif italic text-gs-medium text-[15px] leading-relaxed mb-6 border-l-2 border-gs-red pl-3"
+        >
+          &ldquo;{content.opening}&rdquo;
+        </motion.p>
+      )}
+
       {/* Local News — always visible */}
       {content.local_news && content.local_news.length > 0 && (
         <motion.section

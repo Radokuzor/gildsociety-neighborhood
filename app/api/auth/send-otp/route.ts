@@ -49,11 +49,17 @@ export async function POST(request: NextRequest) {
   // ── 3. Append session ID to redirect URL so the callback can find the verifier
   const callbackUrl = `${redirectTo}&sid=${row.id}`;
 
+  console.log("[send-otp] redirectTo param:", redirectTo);
+  console.log("[send-otp] sid:", row.id);
+  console.log("[send-otp] callbackUrl value:", callbackUrl);
+
   // ── 4. Call Supabase auth API directly with our own code challenge ──────────
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-  const otpRes = await fetch(`${supabaseUrl}/auth/v1/otp`, {
+  const otpUrl = `${supabaseUrl}/auth/v1/otp?redirect_to=${encodeURIComponent(callbackUrl)}`;
+
+  const otpRes = await fetch(otpUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -66,7 +72,6 @@ export async function POST(request: NextRequest) {
       data: { neighborhood_slug: neighborhoodSlug ?? null },
       code_challenge: challenge,
       code_challenge_method: "s256",
-      redirect_to: callbackUrl,
     }),
   });
 
