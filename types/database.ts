@@ -271,6 +271,24 @@ export interface Database {
         };
         Relationships: [];
       };
+      pkce_verifiers: {
+        Row: {
+          id: string;
+          code_verifier: string;
+          expires_at: string;
+        };
+        Insert: {
+          id?: string;
+          code_verifier: string;
+          expires_at?: string;
+        };
+        Update: {
+          id?: string;
+          code_verifier?: string;
+          expires_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
