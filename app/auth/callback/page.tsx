@@ -1,10 +1,19 @@
 "use client";
 
+/**
+ * Auth callback — handles both implicit flow (hash tokens) and PKCE (code param).
+ *
+ * Implicit flow: Supabase puts tokens in the URL hash → we parse them and call
+ * setSession(). No stored code verifier needed, so this works even when the
+ * email app opens the link in a different browser context on mobile.
+ *
+ * PKCE fallback: kept for any links sent before the implicit-flow change.
+ */
+
 import { Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-// useSearchParams() must be inside a Suspense boundary during build.
 export default function AuthCallbackPage() {
   return (
     <Suspense fallback={<Spinner message="Signing you in…" />}>
@@ -14,31 +23,56 @@ export default function AuthCallbackPage() {
 }
 
 function CallbackHandler() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [message, setMessage] = useState("Signing you in…");
 
   useEffect(() => {
-    const code = searchParams.get("code");
     const next = searchParams.get("next") ?? "/";
+    const dest = next.startsWith("/") ? next : "/";
+    const supabase = createClient();
 
-    if (!code) {
-      setMessage("No login code found — redirecting…");
-      setTimeout(() => router.replace("/"), 1500);
+    // ── Implicit flow: tokens in the URL hash ─────────────────────────────────
+    const hash = window.location.hash;
+    if (hash.includes("access_token")) {
+      const params = new URLSearchParams(hash.replace(/^#/, ""));
+      const accessToken = params.get("access_token");
+      const refreshToken = params.get("refresh_token");
+
+      if (accessToken && refreshToken) {
+        supabase.auth
+          .setSession({ access_token: accessToken, refresh_token: refreshToken })
+          .then(({ error }) => {
+            if (error) {
+              console.error("setSession error:", error.message);
+              setMessage("Couldn't sign you in. Please try again.");
+              setTimeout(() => { window.location.href = "/"; }, 2000);
+            } else {
+              // Full navigation so the server re-renders with the new session.
+              window.location.href = dest;
+            }
+          });
+        return;
+      }
+    }
+
+    // ── PKCE flow: exchange the code param ────────────────────────────────────
+    const code = searchParams.get("code");
+    if (code) {
+      supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
+        if (error) {
+          console.error("exchangeCodeForSession error:", error.message);
+          setMessage("Couldn't sign you in. Please try again.");
+          setTimeout(() => { window.location.href = "/"; }, 2000);
+        } else {
+          window.location.href = dest;
+        }
+      });
       return;
     }
 
-    const supabase = createClient();
-    supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
-      if (error) {
-        console.error("Auth callback error:", error.message);
-        setMessage("Couldn't sign you in. Please try again.");
-        setTimeout(() => router.replace("/"), 2000);
-      } else {
-        // Full navigation so the server re-renders the home page with the new session.
-        window.location.href = next.startsWith("/") ? next : "/";
-      }
-    });
+    // No token at all
+    setMessage("No login token found — redirecting…");
+    setTimeout(() => { window.location.href = "/"; }, 1500);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -32,7 +32,17 @@ export default function EmailWall({
     setError(null);
 
     try {
-      const supabase = createClient();
+      // Use implicit flow so the magic link delivers tokens directly in the URL
+      // hash — no PKCE code verifier needed. This makes it work reliably on
+      // mobile where the email app often opens links in a different browser
+      // context than the one that requested the OTP.
+      const { createBrowserClient } = await import("@supabase/ssr");
+      const supabase = createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        { auth: { flowType: "implicit" } }
+      );
+
       const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(`/?n=${neighborhoodSlug}&show=onboarding`)}`;
 
       const { error: authError } = await supabase.auth.signInWithOtp({
