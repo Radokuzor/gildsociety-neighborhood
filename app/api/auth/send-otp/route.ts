@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
       data: { neighborhood_slug: neighborhoodSlug ?? null },
       code_challenge: challenge,
       code_challenge_method: "s256",
-      options: { email_redirect_to: callbackUrl },
+      redirect_to: callbackUrl,
     }),
   });
 
