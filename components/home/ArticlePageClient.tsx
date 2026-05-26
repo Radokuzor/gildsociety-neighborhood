@@ -149,7 +149,6 @@ export default function ArticlePageClient({
         neighborhood={currentNeighborhood}
         issue={featuredIssue}
         isLoading={isLoadingArticle}
-        hasFullAccess={hasFullAccess}
       />
 
       {/* Email wall modal */}

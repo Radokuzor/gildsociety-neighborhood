@@ -27,14 +27,12 @@ interface Props {
   neighborhood: Neighborhood;
   issue: NewsletterIssue | null;
   isLoading: boolean;
-  hasFullAccess: boolean;
 }
 
 export default function ArticleContent({
   neighborhood,
   issue,
   isLoading,
-  hasFullAccess,
 }: Props) {
 
   if (isLoading) {
@@ -60,7 +58,7 @@ export default function ArticleContent({
 
   // ── Legacy format ──────────────────────────────────────────────────────────
   if (!isNewFormat) {
-    return <LegacyArticleContent content={content} neighborhood={neighborhood} hasFullAccess={hasFullAccess} />;
+    return <LegacyArticleContent content={content} neighborhood={neighborhood} />;
   }
 
   // ── New format ─────────────────────────────────────────────────────────────
@@ -103,10 +101,7 @@ export default function ArticleContent({
       )}
 
       {/* ── BELOW PAYWALL ──────────────────────────────────────────────────── */}
-      <div
-        className={`transition-all duration-300 ${!hasFullAccess ? "blur-sm pointer-events-none select-none" : ""}`}
-        aria-hidden={!hasFullAccess}
-      >
+      <div>
         {/* City connection */}
         {content.city_connection && (
           <motion.section
@@ -234,11 +229,9 @@ export default function ArticleContent({
 function LegacyArticleContent({
   content,
   neighborhood,
-  hasFullAccess,
 }: {
   content: NewsletterContent;
   neighborhood: { name: string };
-  hasFullAccess: boolean;
 }) {
   return (
     <article className="max-w-2xl mx-auto px-4 py-6 pb-24">
@@ -266,10 +259,7 @@ function LegacyArticleContent({
         </motion.section>
       )}
 
-      <div
-        className={`transition-all duration-300 ${!hasFullAccess ? "blur-sm pointer-events-none select-none" : ""}`}
-        aria-hidden={!hasFullAccess}
-      >
+      <div>
         {content.person_of_week && (
           <motion.section initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="mb-8">
             <div className="flex items-start gap-4 bg-gs-surface rounded-2xl p-4">
