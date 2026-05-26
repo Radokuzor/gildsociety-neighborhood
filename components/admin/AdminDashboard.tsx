@@ -96,6 +96,16 @@ export default function AdminDashboard({
   const [deleteConfirm, setDeleteConfirm] = useState<{ subscriberId: string; email: string | null; neighborhoodName: string } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // ── Neighborhood delete state ─────────────────────────────────────────────────
+  const [deleteHoodConfirm, setDeleteHoodConfirm] = useState<{
+    id: string;
+    name: string;
+    subCount: number;
+    issueCount: number;
+  } | null>(null);
+  const [deletingHoodId, setDeletingHoodId] = useState<string | null>(null);
+  const [deleteHoodError, setDeleteHoodError] = useState<string | null>(null);
+
   // ── Zip code state ────────────────────────────────────────────────────────────
   const [expandedZips, setExpandedZips] = useState<string | null>(null);
   const [zipsByHood, setZipsByHood] = useState<Record<string, ZipRow[]>>({});
@@ -351,6 +361,38 @@ export default function AdminDashboard({
       setEditError("Request failed");
     } finally {
       setSavingEdit(false);
+    }
+  }
+
+  // ── Neighborhood delete ───────────────────────────────────────────────────────
+  function openDeleteHood(hood: Neighborhood) {
+    const subs = subCount(hood.id);
+    const issues = localIssues.filter((i) => i.neighborhood_id === hood.id).length;
+    setDeleteHoodError(null);
+    setDeleteHoodConfirm({ id: hood.id, name: hood.name, subCount: subs, issueCount: issues });
+  }
+
+  async function confirmDeleteHood() {
+    if (!deleteHoodConfirm) return;
+    setDeletingHoodId(deleteHoodConfirm.id);
+    setDeleteHoodError(null);
+    try {
+      const res = await fetch(`/api/admin/neighborhoods?id=${deleteHoodConfirm.id}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (res.ok) {
+        showToast(`"${deleteHoodConfirm.name}" deleted`);
+        setDeleteHoodConfirm(null);
+        router.refresh();
+      } else {
+        setDeleteHoodError(data.error ?? "Failed to delete neighborhood");
+      }
+    } catch {
+      setDeleteHoodError("Request failed");
+    } finally {
+      setDeletingHoodId(null);
     }
   }
 
@@ -972,6 +1014,7 @@ export default function AdminDashboard({
                       <div className="flex items-center gap-2">
                         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${hood.active ? "bg-green-100 text-green-700" : "bg-gs-surface text-gs-medium"}`}>{hood.active ? "Active" : "Inactive"}</span>
                         <button onClick={() => startEdit(hood)} className="text-xs font-semibold text-gs-medium hover:text-gs-dark border border-gs-border rounded-lg px-2.5 py-1 transition-colors tap-none">Edit</button>
+                        <button onClick={() => openDeleteHood(hood)} className="text-xs font-semibold text-gs-light hover:text-red-500 border border-gs-border hover:border-red-300 rounded-lg px-2.5 py-1 transition-colors tap-none">Delete</button>
                       </div>
                     </div>
                   )}
@@ -1052,6 +1095,65 @@ export default function AdminDashboard({
                 className="flex-1 py-2.5 border border-gs-border text-sm font-semibold text-gs-dark rounded-xl hover:border-gs-dark transition-colors disabled:opacity-40 tap-none"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete neighborhood confirmation modal */}
+      {deleteHoodConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => !deletingHoodId && setDeleteHoodConfirm(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center mb-4">
+              <span className="text-2xl">🏘️</span>
+            </div>
+            <p className="font-black text-gs-dark text-lg mb-1">Delete neighborhood?</p>
+            <p className="text-sm text-gs-medium mb-3">
+              <span className="font-semibold text-gs-dark">{deleteHoodConfirm.name}</span> will be permanently removed. This cannot be undone.
+            </p>
+
+            {/* Blocked state — subscribers still exist */}
+            {deleteHoodConfirm.subCount > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-3 mb-4">
+                <p className="text-sm font-bold text-red-700 mb-0.5">⚠️ Cannot delete yet</p>
+                <p className="text-xs text-red-600">
+                  This neighborhood has <strong>{deleteHoodConfirm.subCount} subscriber{deleteHoodConfirm.subCount !== 1 ? "s" : ""}</strong>. Go to the Subscribers tab and remove them all before deleting the neighborhood.
+                </p>
+              </div>
+            )}
+
+            {/* Safe to delete — show what will be removed */}
+            {deleteHoodConfirm.subCount === 0 && (
+              <div className="bg-gs-surface rounded-2xl p-3 mb-4 space-y-1">
+                <p className="text-xs font-black uppercase tracking-wider text-gs-medium mb-2">Will also permanently delete:</p>
+                <p className="text-xs text-gs-dark">• All ZIP code mappings</p>
+                <p className="text-xs text-gs-dark">• All pending nominations</p>
+                <p className="text-xs text-gs-dark">• {deleteHoodConfirm.issueCount} newsletter issue{deleteHoodConfirm.issueCount !== 1 ? "s" : ""} (drafts + sent)</p>
+              </div>
+            )}
+
+            {/* API error */}
+            {deleteHoodError && (
+              <p className="text-xs text-red-600 font-semibold mb-3">⚠️ {deleteHoodError}</p>
+            )}
+
+            <div className="flex gap-3">
+              {deleteHoodConfirm.subCount === 0 && (
+                <button
+                  onClick={() => void confirmDeleteHood()}
+                  disabled={!!deletingHoodId}
+                  className="flex-1 py-2.5 bg-red-600 text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50 tap-none"
+                >
+                  {deletingHoodId ? "Deleting…" : "Yes, delete permanently"}
+                </button>
+              )}
+              <button
+                onClick={() => { setDeleteHoodConfirm(null); setDeleteHoodError(null); }}
+                disabled={!!deletingHoodId}
+                className="flex-1 py-2.5 border border-gs-border text-sm font-semibold text-gs-dark rounded-xl hover:border-gs-dark transition-colors disabled:opacity-40 tap-none"
+              >
+                {deleteHoodConfirm.subCount > 0 ? "Close" : "Cancel"}
               </button>
             </div>
           </div>
