@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       [
         {
           user_id: user.id,
+          email: user.email ?? null,
           neighborhood_id: neighborhoodId,
           first_name: firstName?.trim() || null,
           last_name: lastNameExists ? (lastName?.trim() || null) : undefined,

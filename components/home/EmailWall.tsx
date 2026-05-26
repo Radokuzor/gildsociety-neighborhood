@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { createClient } from "@/lib/supabase/client";
 
 interface Props {
   neighborhoodName: string;
@@ -32,30 +31,20 @@ export default function EmailWall({
     setError(null);
 
     try {
-      // Use implicit flow so the magic link delivers tokens directly in the URL
-      // hash — no PKCE code verifier needed. This makes it work reliably on
-      // mobile where the email app often opens links in a different browser
-      // context than the one that requested the OTP.
-      const { createBrowserClient } = await import("@supabase/ssr");
-      const supabase = createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        { auth: { flowType: "implicit" } }
-      );
-
       const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(`/?n=${neighborhoodSlug}&show=onboarding`)}`;
 
-      const { error: authError } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: redirectTo,
-          data: {
-            neighborhood_slug: neighborhoodSlug,
-          },
-        },
+      // Server-side PKCE: verifier is generated + stored in DB so the callback
+      // can look it up regardless of which browser context opens the magic link.
+      const res = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, redirectTo, neighborhoodSlug }),
       });
 
-      if (authError) throw authError;
+      if (!res.ok) {
+        const data = await res.json() as { error?: string };
+        throw new Error(data.error ?? "Failed to send magic link");
+      }
 
       setSent(true);
       onEmailSubmit(email);
