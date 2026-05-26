@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import ArticlePageClient from "@/components/home/ArticlePageClient";
 import type { Database } from "@/types/database";
@@ -16,10 +17,18 @@ export interface HomePageData {
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ n?: string; show?: string }>;
+  searchParams: Promise<{ n?: string; show?: string; code?: string }>;
 }) {
-  const supabase = await createClient();
   const params = await searchParams;
+
+  // Supabase sometimes sends the magic-link code to the Site URL (this page)
+  // instead of /auth/callback when the redirect URL isn't in the allowlist.
+  // Catch it here and forward to the callback so the session is established.
+  if (params.code) {
+    redirect(`/auth/callback?code=${params.code}&next=/`);
+  }
+
+  const supabase = await createClient();
 
   // ── 1. Find the default neighborhood (admin-set or query param override) ──
   let targetSlug: string | null = params.n ?? null;
