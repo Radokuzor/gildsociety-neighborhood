@@ -12,10 +12,11 @@ export default async function AdminPage() {
     .select("*")
     .order("name");
 
-  // Load all newsletter issues with neighborhood name
+  // Load all newsletter issues — no join (PostgREST embedded joins are unreliable here;
+  // neighborhood name is resolved on the client from the neighborhoods array)
   const { data: issues } = await supabase
     .from("newsletter_issues")
-    .select("id, neighborhood_id, subject, preview_text, status, created_at, sent_at, neighborhoods(name, slug)")
+    .select("id, neighborhood_id, subject, preview_text, content_json, status, created_at, sent_at")
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -60,8 +61,9 @@ export interface AdminIssue {
   neighborhood_id: string;
   subject: string;
   preview_text: string | null;
+  content_json: unknown;
   status: string;
   created_at: string;
   sent_at: string | null;
-  neighborhoods: { name: string; slug: string } | null;
+  // Note: neighborhood name is resolved client-side from the neighborhoods prop
 }

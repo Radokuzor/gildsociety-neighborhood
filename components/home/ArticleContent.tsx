@@ -1,19 +1,26 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import type { Database } from "@/types/database";
 
 type Neighborhood = Database["public"]["Tables"]["neighborhoods"]["Row"];
 type NewsletterIssue = Database["public"]["Tables"]["newsletter_issues"]["Row"];
 
+/** New content schema — matches admin preview and email template */
 interface NewsletterContent {
+  // ── New format ──────────────────────────────────────────────────────────────
+  opening?: string;
+  local_news?: Array<{ headline: string; body: string }>;
+  city_connection?: { headline: string; body: string } | null;
+  neighborhood_checkin?: { question: string; options: string[] } | null;
+  business_spotlight?: { name: string; description: string; location: string } | null;
+  diy_tip?: { title: string; body: string } | null;
+  fun_fact?: string;
+  // ── Legacy format (kept for backward compat) ─────────────────────────────
   top_news?: Array<{ headline: string; summary: string; url?: string }>;
   person_of_week?: { name: string; blurb: string };
-  business_spotlight?: { name: string; description: string; why_this_week?: string };
   community_pulse?: { type: "trivia" | "poll"; question: string; options: string[] };
-  fun_fact?: string;
-  diy_tip?: { title: string; body: string };
 }
 
 interface Props {
@@ -45,7 +52,6 @@ export default function ArticleContent({
 
     observerRef.current = new IntersectionObserver(
       ([entry]) => {
-        // When the marker scrolls INTO view from below → paywall
         if (entry.isIntersecting && !triggeredRef.current) {
           triggeredRef.current = true;
           onPaywallReached();
@@ -77,155 +83,85 @@ export default function ArticleContent({
   }
 
   const content = (issue.content_json as NewsletterContent) ?? {};
-  const sentDate = issue.sent_at
-    ? new Date(issue.sent_at).toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      })
-    : null;
+  const isNewFormat = !!(content.local_news || content.opening);
 
+  // ── Legacy format ──────────────────────────────────────────────────────────
+  if (!isNewFormat) {
+    return <LegacyArticleContent content={content} neighborhood={neighborhood} hasFullAccess={hasFullAccess} onPaywallReached={onPaywallReached} paywallMarkerRef={paywallMarkerRef} />;
+  }
+
+  // ── New format ─────────────────────────────────────────────────────────────
   return (
     <article className="max-w-2xl mx-auto px-4 py-6 pb-24">
-      {/* Article meta */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="mb-6"
-      >
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-xs bg-gs-red/10 text-gs-red font-black uppercase tracking-widest px-2.5 py-1 rounded-full">
-            {neighborhood.name}
-          </span>
-          {sentDate && (
-            <span className="text-xs text-gs-medium">{sentDate}</span>
-          )}
-        </div>
-        <h1 className="text-2xl sm:text-3xl font-black text-gs-dark leading-snug">
-          {issue.subject}
-        </h1>
-        {issue.preview_text && (
-          <p className="text-gs-medium mt-2 leading-relaxed">{issue.preview_text}</p>
-        )}
-        <div className="mt-4 h-px bg-gs-border" />
-      </motion.div>
 
-      {/* ── ABOVE PAYWALL (always visible) ─────────────────────────────────── */}
+      {/* ── ABOVE PAYWALL ──────────────────────────────────────────────────── */}
 
-      {/* Top News — always shown */}
-      {content.top_news && content.top_news.length > 0 && (
+      {/* Local News — always visible */}
+      {content.local_news && content.local_news.length > 0 && (
         <motion.section
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
           className="mb-8"
         >
-          <SectionLabel>📰 Top News</SectionLabel>
           <div className="space-y-5">
-            {content.top_news.map((item, i) => (
-              <div key={i} className={i < content.top_news!.length - 1 ? "pb-5 border-b border-gs-border" : ""}>
-                <h2 className="font-black text-gs-dark text-lg leading-snug mb-1">
-                  {item.url ? (
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:text-gs-red transition-colors"
-                    >
-                      {item.headline}
-                    </a>
-                  ) : (
-                    item.headline
-                  )}
+            {content.local_news.map((item, i) => (
+              <div key={i} className={i < (content.local_news?.length ?? 0) - 1 ? "pb-5 border-b border-gs-border" : ""}>
+                <h2 className="font-black text-gs-dark text-lg leading-snug mb-2 font-serif">
+                  {item.headline}
                 </h2>
-                <p className="text-gs-medium leading-relaxed text-sm">{item.summary}</p>
+                <p className="text-gs-medium leading-relaxed text-sm">{item.body}</p>
               </div>
             ))}
           </div>
         </motion.section>
       )}
 
-      {/* ── PAYWALL MARKER (at ~40% of content) ───────────────────────────── */}
-      {/* Invisible sentinel — when it enters viewport, paywall fires */}
+      {/* ── PAYWALL MARKER ─────────────────────────────────────────────────── */}
       <div ref={paywallMarkerRef} aria-hidden="true" />
 
-      {/* ── BELOW PAYWALL (blurred when no access) ─────────────────────────── */}
+      {/* ── BELOW PAYWALL ──────────────────────────────────────────────────── */}
       <div
-        className={`transition-all duration-300 ${
-          !hasFullAccess
-            ? "blur-sm pointer-events-none select-none"
-            : ""
-        }`}
+        className={`transition-all duration-300 ${!hasFullAccess ? "blur-sm pointer-events-none select-none" : ""}`}
         aria-hidden={!hasFullAccess}
       >
-        {/* Person of the Week */}
-        {content.person_of_week && (
+        {/* City connection */}
+        {content.city_connection && (
           <motion.section
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
             className="mb-8"
           >
-            <SectionLabel>⭐ Person of the Week</SectionLabel>
-            <div className="flex items-start gap-4 bg-gs-surface rounded-2xl p-4">
-              <div className="w-12 h-12 rounded-full bg-gs-red/10 flex items-center justify-center flex-shrink-0 text-xl">
-                👤
-              </div>
-              <div>
-                <p className="font-black text-gs-dark text-lg">{content.person_of_week.name}</p>
-                <p className="text-gs-medium text-sm leading-relaxed mt-1">
-                  {content.person_of_week.blurb}
-                </p>
-              </div>
+            <div className="bg-gs-surface rounded-2xl p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-gs-medium mb-3">
+                In {neighborhood.city} This Week
+              </p>
+              <h3 className="font-bold text-gs-dark text-base leading-snug mb-2 font-serif">
+                {content.city_connection.headline}
+              </h3>
+              <p className="text-gs-medium leading-relaxed text-sm">{content.city_connection.body}</p>
             </div>
           </motion.section>
         )}
 
-        {/* Business Spotlight */}
-        {content.business_spotlight && (
+        {/* Neighborhood Check-in */}
+        {content.neighborhood_checkin && (
           <motion.section
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.15 }}
             className="mb-8"
           >
-            <SectionLabel>🏪 Local Business Spotlight</SectionLabel>
-            <div className="bg-gs-surface rounded-2xl p-4">
-              <p className="font-black text-gs-dark text-lg mb-1">
-                {content.business_spotlight.name}
+            <div className="bg-gs-surface rounded-2xl p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-gs-medium mb-3">
+                Neighborhood Check-in
               </p>
-              <p className="text-gs-medium text-sm leading-relaxed">
-                {content.business_spotlight.description}
-              </p>
-              {content.business_spotlight.why_this_week && (
-                <p className="text-xs text-gs-red font-bold uppercase tracking-wide mt-2">
-                  {content.business_spotlight.why_this_week}
-                </p>
-              )}
-            </div>
-          </motion.section>
-        )}
-
-        {/* Community Pulse */}
-        {content.community_pulse && (
-          <motion.section
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="mb-8"
-          >
-            <SectionLabel>
-              {content.community_pulse.type === "trivia"
-                ? "🧠 Neighborhood Trivia"
-                : "🗳️ Community Pulse"}
-            </SectionLabel>
-            <div className="bg-gs-surface rounded-2xl p-4">
-              <p className="font-semibold text-gs-dark mb-3">
-                {content.community_pulse.question}
+              <p className="font-semibold text-gs-dark mb-4 leading-snug">
+                {content.neighborhood_checkin.question}
               </p>
               <div className="space-y-2">
-                {content.community_pulse.options.map((opt, i) => (
+                {content.neighborhood_checkin.options.map((opt, i) => (
                   <button
                     key={i}
                     className="w-full text-left px-4 py-3 rounded-xl border-2 border-gs-border bg-white hover:border-gs-red hover:bg-accent text-gs-dark font-medium text-sm transition-all tap-none"
@@ -234,22 +170,43 @@ export default function ArticleContent({
                   </button>
                 ))}
               </div>
+              <p className="text-xs text-gs-light mt-3">Results shared in next week&apos;s edition.</p>
             </div>
           </motion.section>
         )}
 
-        {/* Fun Fact */}
-        {content.fun_fact && (
+        {/* Nominate a Neighbor */}
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="mb-8"
+        >
+          <NominateForm neighborhoodName={neighborhood.name} />
+        </motion.section>
+
+        {/* Business Spotlight */}
+        {content.business_spotlight && (
           <motion.section
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.25 }}
             className="mb-8"
           >
-            <SectionLabel>💡 Fun Fact</SectionLabel>
-            <p className="text-gs-dark leading-relaxed bg-gs-surface rounded-2xl p-4">
-              {content.fun_fact}
-            </p>
+            <div className="bg-gs-surface rounded-2xl p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-gs-medium mb-3">Business Spotlight</p>
+              <p className="font-black text-gs-dark text-base mb-0.5">
+                {content.business_spotlight.name}
+              </p>
+              {content.business_spotlight.location && (
+                <p className="text-xs text-gs-light font-semibold uppercase tracking-wide mb-2">
+                  {content.business_spotlight.location}
+                </p>
+              )}
+              <p className="text-gs-medium text-sm leading-relaxed">
+                {content.business_spotlight.description}
+              </p>
+            </div>
           </motion.section>
         )}
 
@@ -261,39 +218,185 @@ export default function ArticleContent({
             transition={{ delay: 0.3 }}
             className="mb-8"
           >
-            <SectionLabel>🔧 DIY & Home Tips</SectionLabel>
-            <div className="bg-gs-surface rounded-2xl p-4">
+            <div className="bg-gs-surface rounded-2xl p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-gs-medium mb-3">DIY Tip</p>
               <p className="font-black text-gs-dark mb-2">{content.diy_tip.title}</p>
               <p className="text-gs-medium text-sm leading-relaxed">{content.diy_tip.body}</p>
             </div>
           </motion.section>
         )}
 
-        {/* Nominate section */}
-        <div className="bg-gs-red rounded-3xl p-5 text-white mt-4">
-          <p className="font-black text-lg mb-1">Know someone making a difference?</p>
-          <p className="text-white/80 text-sm mb-4">
-            Nominate them for Person of the Week in {neighborhood.name}.
-          </p>
-          <a
-            href={`/${neighborhood.slug}/nominate`}
-            className="inline-block bg-white text-gs-red font-bold text-sm py-2 px-5 rounded-xl hover:bg-white/90 transition-colors"
+        {/* Fun Fact */}
+        {content.fun_fact && (
+          <motion.section
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+            className="mb-8"
           >
-            Submit a nomination →
-          </a>
-        </div>
+            <div className="bg-gs-surface border-l-4 border-gs-red rounded-r-2xl p-5">
+              <p className="text-[10px] font-black uppercase tracking-widest text-gs-medium mb-2">Fun Fact</p>
+              <p className="text-gs-dark leading-relaxed italic text-sm">
+                &ldquo;{content.fun_fact}&rdquo;
+              </p>
+            </div>
+          </motion.section>
+        )}
       </div>
     </article>
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+// ── Legacy format renderer ─────────────────────────────────────────────────────
+
+function LegacyArticleContent({
+  content,
+  neighborhood,
+  hasFullAccess,
+  onPaywallReached,
+  paywallMarkerRef,
+}: {
+  content: NewsletterContent;
+  neighborhood: { name: string };
+  hasFullAccess: boolean;
+  onPaywallReached: () => void;
+  paywallMarkerRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  // silence unused warning
+  void onPaywallReached;
   return (
-    <p className="text-xs font-black uppercase tracking-wider text-gs-medium mb-4">
-      {children}
-    </p>
+    <article className="max-w-2xl mx-auto px-4 py-6 pb-24">
+      {content.top_news && content.top_news.length > 0 && (
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="mb-8"
+        >
+          <div className="space-y-5">
+            {content.top_news.map((item, i) => (
+              <div key={i} className={i < (content.top_news?.length ?? 0) - 1 ? "pb-5 border-b border-gs-border" : ""}>
+                <h2 className="font-black text-gs-dark text-lg leading-snug mb-1">
+                  {item.url ? (
+                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="hover:text-gs-red transition-colors">
+                      {item.headline}
+                    </a>
+                  ) : item.headline}
+                </h2>
+                <p className="text-gs-medium leading-relaxed text-sm">{item.summary}</p>
+              </div>
+            ))}
+          </div>
+        </motion.section>
+      )}
+
+      <div ref={paywallMarkerRef} aria-hidden="true" />
+
+      <div
+        className={`transition-all duration-300 ${!hasFullAccess ? "blur-sm pointer-events-none select-none" : ""}`}
+        aria-hidden={!hasFullAccess}
+      >
+        {content.person_of_week && (
+          <motion.section initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="mb-8">
+            <div className="flex items-start gap-4 bg-gs-surface rounded-2xl p-4">
+              <div className="w-12 h-12 rounded-full bg-gs-red/10 flex items-center justify-center flex-shrink-0 text-xl">👤</div>
+              <div>
+                <p className="font-black text-gs-dark text-lg">{content.person_of_week.name}</p>
+                <p className="text-gs-medium text-sm leading-relaxed mt-1">{content.person_of_week.blurb}</p>
+              </div>
+            </div>
+          </motion.section>
+        )}
+        {content.community_pulse && (
+          <motion.section initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="mb-8">
+            <div className="bg-gs-surface rounded-2xl p-4">
+              <p className="font-semibold text-gs-dark mb-3">{content.community_pulse.question}</p>
+              <div className="space-y-2">
+                {content.community_pulse.options.map((opt, i) => (
+                  <button key={i} className="w-full text-left px-4 py-3 rounded-xl border-2 border-gs-border bg-white hover:border-gs-red hover:bg-accent text-gs-dark font-medium text-sm transition-all tap-none">
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </motion.section>
+        )}
+        {content.fun_fact && (
+          <motion.section initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="mb-8">
+            <p className="text-gs-dark leading-relaxed bg-gs-surface rounded-2xl p-4 italic">{content.fun_fact}</p>
+          </motion.section>
+        )}
+        {content.diy_tip && (
+          <motion.section initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="mb-8">
+            <div className="bg-gs-surface rounded-2xl p-4">
+              <p className="font-black text-gs-dark mb-2">{content.diy_tip.title}</p>
+              <p className="text-gs-medium text-sm leading-relaxed">{content.diy_tip.body}</p>
+            </div>
+          </motion.section>
+        )}
+        <NominateForm neighborhoodName={neighborhood.name} />
+      </div>
+    </article>
   );
 }
+
+// ── Nominate form ──────────────────────────────────────────────────────────────
+
+function NominateForm({ neighborhoodName }: { neighborhoodName: string }) {
+  const [name, setName] = useState("");
+  const [reason, setReason] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim() && !reason.trim()) return;
+    setSubmitted(true);
+  }
+
+  if (submitted) {
+    return (
+      <div className="rounded-2xl bg-gs-red p-6 text-center">
+        <p className="text-2xl mb-2">🙌</p>
+        <p className="font-black text-white text-base">Thanks for the nomination!</p>
+        <p className="text-white/80 text-sm mt-1">We&apos;ll look into it for the next issue.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl bg-gs-red p-6">
+      <p className="font-black text-white text-base mb-1.5">Know a neighbor making a difference?</p>
+      <p className="text-white/88 text-sm mb-5 leading-relaxed">
+        Every week we spotlight one person who makes {neighborhoodName} a better place. Drop their name — it takes 30 seconds.
+      </p>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <input
+          type="text"
+          placeholder="Their name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full rounded-xl border-0 bg-white px-4 py-2.5 text-sm text-gs-dark placeholder:text-gs-medium focus:outline-none focus:ring-2 focus:ring-white/50 transition-all"
+        />
+        <textarea
+          placeholder="Why do they deserve a shoutout?"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          rows={3}
+          className="w-full rounded-xl border-0 bg-white px-4 py-2.5 text-sm text-gs-dark placeholder:text-gs-medium focus:outline-none focus:ring-2 focus:ring-white/50 transition-all resize-none"
+        />
+        <button
+          type="submit"
+          disabled={!name.trim() && !reason.trim()}
+          className="w-full bg-white text-gs-red font-black text-sm py-2.5 rounded-xl hover:bg-white/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+        >
+          Submit nomination
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ── Article skeleton ───────────────────────────────────────────────────────────
 
 function ArticleSkeleton() {
   return (

@@ -92,6 +92,7 @@ export interface Database {
           user_id: string;
           neighborhood_id: string;
           first_name: string | null;
+          last_name: string | null;
           address: string | null;
           created_at: string;
         };
@@ -100,6 +101,7 @@ export interface Database {
           user_id: string;
           neighborhood_id: string;
           first_name?: string | null;
+          last_name?: string | null;
           address?: string | null;
           created_at?: string;
         };
@@ -108,6 +110,7 @@ export interface Database {
           user_id?: string;
           neighborhood_id?: string;
           first_name?: string | null;
+          last_name?: string | null;
           address?: string | null;
           created_at?: string;
         };

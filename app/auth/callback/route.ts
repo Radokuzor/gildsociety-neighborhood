@@ -11,34 +11,10 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error && data.session) {
-      const user = data.session.user;
+      // Subscriber data is collected and saved by OnboardingOverlay after the
+      // user lands back on the site. No upsert needed here.
 
-      // Upsert subscriber record using metadata from sign-up
-      const meta = user.user_metadata as {
-        first_name?: string;
-        address?: string;
-        neighborhood_id?: string;
-      };
-
-      if (meta.neighborhood_id) {
-        // Use service role for this write (bypasses RLS during callback)
-        const { createServiceClient } = await import("@/lib/supabase/server");
-        const serviceSupabase = await createServiceClient();
-
-        await serviceSupabase.from("subscribers").upsert(
-          [
-            {
-              user_id: user.id,
-              neighborhood_id: meta.neighborhood_id,
-              first_name: meta.first_name ?? null,
-              address: meta.address ?? null,
-            },
-          ],
-          { onConflict: "user_id" }
-        );
-      }
-
-      // Redirect to the neighborhood page (or fallback)
+      // Redirect to wherever the magic link pointed (e.g. /?n=slug&show=onboarding)
       const redirectTo = next.startsWith("/") ? `${origin}${next}` : origin;
       return NextResponse.redirect(redirectTo);
     }

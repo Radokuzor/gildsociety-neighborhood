@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const supabase = await createServiceClient();
+  const supabase = createServiceClient();
 
   const { data, error } = await supabase
     .from("neighborhoods")
@@ -49,6 +49,58 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ neighborhood: data });
+}
+
+// ── PATCH /api/admin/neighborhoods — edit an existing neighborhood ─────────────
+export async function PATCH(request: NextRequest) {
+  if (!isAuthorized(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await request.json() as {
+    id: string;
+    name?: string;
+    city?: string;
+    state?: string;
+    active?: boolean;
+  };
+
+  const { id, name, city, state, active } = body;
+
+  if (!id) {
+    return NextResponse.json({ error: "Neighborhood id is required" }, { status: 400 });
+  }
+
+  // Build a strongly-typed patch with only the fields that were provided
+  const patch: {
+    name?: string;
+    city?: string;
+    state?: string;
+    active?: boolean;
+  } = {};
+  if (name !== undefined) patch.name = name;
+  if (city !== undefined) patch.city = city;
+  if (state !== undefined) patch.state = state;
+  if (active !== undefined) patch.active = active;
+
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+  }
+
+  const supabase = createServiceClient();
+
+  const { data, error } = await supabase
+    .from("neighborhoods")
+    .update(patch)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

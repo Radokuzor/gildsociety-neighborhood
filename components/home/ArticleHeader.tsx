@@ -11,6 +11,7 @@ interface Props {
   allNeighborhoods: Neighborhood[];
   onNeighborhoodChange: (hood: Neighborhood) => void;
   isLoggedIn: boolean;
+  onSignUp: () => void;
 }
 
 export default function ArticleHeader({
@@ -18,6 +19,7 @@ export default function ArticleHeader({
   allNeighborhoods,
   onNeighborhoodChange,
   isLoggedIn,
+  onSignUp,
 }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -107,12 +109,12 @@ export default function ArticleHeader({
               My account
             </a>
           ) : (
-            <a
-              href="/?show=onboarding"
+            <button
+              onClick={onSignUp}
               className="text-xs font-semibold text-gs-red border border-gs-red rounded-full px-3 py-1.5 hover:bg-accent transition-colors tap-none"
             >
               Sign up
-            </a>
+            </button>
           )}
         </div>
       </div>

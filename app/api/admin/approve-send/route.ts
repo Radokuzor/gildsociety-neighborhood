@@ -15,21 +15,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { issueId } = (await request.json()) as { issueId: string };
+  let body: { issueId?: string };
+  try {
+    body = (await request.json()) as { issueId?: string };
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const { issueId } = body;
   if (!issueId) {
     return NextResponse.json({ error: "issueId is required" }, { status: 400 });
   }
 
-  const supabase = await createServiceClient();
+  const supabase = createServiceClient();
 
   // Load the issue
   const { data: issue, error: issueError } = await supabase
     .from("newsletter_issues")
-    .select("*, neighborhoods(*)")
+    .select("*")
     .eq("id", issueId)
     .single();
 
-  if (issueError || !issue) {
+  if (issueError) {
+    console.error("[approve-send] Issue query error:", issueError);
+    return NextResponse.json(
+      { error: `Database error: ${issueError.message}` },
+      { status: 500 }
+    );
+  }
+
+  if (!issue) {
     return NextResponse.json({ error: "Issue not found" }, { status: 404 });
   }
 
@@ -38,27 +53,49 @@ export async function POST(request: NextRequest) {
   }
 
   if (!issue.html_body) {
-    return NextResponse.json({ error: "Issue has no HTML body — regenerate it" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Issue has no HTML body — regenerate it first" },
+      { status: 400 }
+    );
   }
 
-  const hood = issue.neighborhoods as { name: string; city: string; state: string } | null;
+  // Load the neighborhood separately (avoids PostgREST join issues)
+  const { data: hood, error: hoodError } = await supabase
+    .from("neighborhoods")
+    .select("name, city, state")
+    .eq("id", issue.neighborhood_id)
+    .single();
+
+  if (hoodError) {
+    console.error("[approve-send] Neighborhood query error:", hoodError);
+    return NextResponse.json(
+      { error: `Database error: ${hoodError.message}` },
+      { status: 500 }
+    );
+  }
+
   if (!hood) {
     return NextResponse.json({ error: "Neighborhood not found" }, { status: 404 });
   }
 
-  // Load all subscribers for this neighborhood + their emails from auth.users
-  // We join subscribers → auth.users via user_id using the service role
+  // Load all subscribers for this neighborhood
   const { data: subscribers, error: subError } = await supabase
     .from("subscribers")
     .select("user_id, first_name")
     .eq("neighborhood_id", issue.neighborhood_id);
 
   if (subError) {
+    console.error("[approve-send] Subscribers query error:", subError);
     return NextResponse.json({ error: subError.message }, { status: 500 });
   }
 
   if (!subscribers || subscribers.length === 0) {
-    return NextResponse.json({ sent: 0, message: "No subscribers in this neighborhood yet." });
+    // No subscribers to email, but still mark the issue as sent so it can be pinned
+    await supabase
+      .from("newsletter_issues")
+      .update({ status: "sent", sent_at: new Date().toISOString() })
+      .eq("id", issueId);
+    return NextResponse.json({ sent: 0, status: "sent", message: "No subscribers yet — article marked as sent and ready to pin." });
   }
 
   // Get emails for each user_id via auth admin API
@@ -78,6 +115,10 @@ export async function POST(request: NextRequest) {
       email: emailMap[s.user_id],
       firstName: s.first_name,
     }));
+
+  if (recipients.length === 0) {
+    return NextResponse.json({ sent: 0, message: "No subscriber emails found." });
+  }
 
   // Send via Resend
   const { sent, failed } = await sendNewsletterBatch(

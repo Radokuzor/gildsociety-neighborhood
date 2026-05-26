@@ -11,10 +11,12 @@ interface Props {
   defaultNeighborhoodName: string;
 }
 
-type Step = "name" | "address" | "done";
+type Step = "name" | "address" | "neighborhood" | "done";
 
 const inputCls =
   "w-full text-xl font-semibold text-gs-dark bg-transparent border-0 border-b-2 border-gs-border pb-2 focus:outline-none focus:border-gs-red placeholder:text-gs-light placeholder:font-normal transition-colors duration-200";
+
+const labelCls = "text-xs font-semibold text-gs-medium uppercase tracking-wider mb-2 block";
 
 export default function OnboardingOverlay({
   onDismiss,
@@ -26,17 +28,27 @@ export default function OnboardingOverlay({
 
   const [step, setStep] = useState<Step>("name");
   const [direction, setDirection] = useState(1);
-  const [firstName, setFirstName] = useState("");
-  const [address, setAddress] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Get neighborhood list for potential override (optional — we default to detected hood)
+  // Name fields
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+
+  // Address fields (structured)
+  const [street, setStreet] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [zip, setZip] = useState("");
+
+  // Neighborhood
   const [neighborhoods, setNeighborhoods] = useState<
     Array<{ id: string; name: string; city: string; state: string }>
   >([]);
   const [selectedNeighborhoodId, setSelectedNeighborhoodId] = useState(defaultNeighborhoodId);
+  const [zipMatched, setZipMatched] = useState(false);
 
+  // Load all neighborhoods for the dropdown
   useEffect(() => {
     supabase
       .from("neighborhoods")
@@ -44,6 +56,38 @@ export default function OnboardingOverlay({
       .eq("active", true)
       .then(({ data }) => setNeighborhoods(data ?? []));
   }, [supabase]);
+
+  // Auto-match neighborhood when ZIP reaches 5 digits
+  useEffect(() => {
+    const trimmed = zip.replace(/\D/g, "").slice(0, 5);
+    if (trimmed.length !== 5) {
+      setZipMatched(false);
+      return;
+    }
+
+    supabase
+      .from("zip_neighborhood_map")
+      .select("neighborhood_id")
+      .eq("zip_code", trimmed)
+      .single()
+      .then(async ({ data: mapRow }) => {
+        if (!mapRow?.neighborhood_id) {
+          setZipMatched(false);
+          return;
+        }
+        const { data: n } = await supabase
+          .from("neighborhoods")
+          .select("id, name, city, state")
+          .eq("id", mapRow.neighborhood_id)
+          .single();
+        if (n) {
+          setSelectedNeighborhoodId(n.id);
+          setZipMatched(true);
+        } else {
+          setZipMatched(false);
+        }
+      });
+  }, [zip, supabase]);
 
   function go(next: Step, dir: number) {
     setDirection(dir);
@@ -56,27 +100,33 @@ export default function OnboardingOverlay({
     setError(null);
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      // Combine structured address into one string for storage
+      const addressParts = [street.trim(), city.trim(), state.trim(), zip.trim()].filter(Boolean);
+      const fullAddress = addressParts.join(", ");
 
-      if (!user) {
-        setError("Session expired. Please try the link again.");
-        setLoading(false);
+      // Save via server-side API route (uses service role — bypasses RLS,
+      // gracefully handles missing last_name column if migration hasn't run)
+      const res = await fetch("/api/subscriber/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          neighborhoodId: selectedNeighborhoodId,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          address: fullAddress,
+        }),
+      });
+
+      const data = await res.json() as { ok?: boolean; error?: string };
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          setError("Session expired. Please click the magic link again.");
+        } else {
+          setError(data.error ?? "Something went wrong saving your info.");
+        }
         return;
       }
-
-      await supabase.from("subscribers").upsert(
-        [
-          {
-            user_id: user.id,
-            neighborhood_id: selectedNeighborhoodId,
-            first_name: firstName.trim() || null,
-            address: address.trim() || null,
-          },
-        ],
-        { onConflict: "user_id" }
-      );
 
       go("done", 1);
       setTimeout(onComplete, 1800);
@@ -92,6 +142,10 @@ export default function OnboardingOverlay({
     center: { x: 0, opacity: 1, transition: { duration: 0.3, ease: "easeOut" as const } },
     exit: (d: number) => ({ x: d > 0 ? -40 : 40, opacity: 0, transition: { duration: 0.2, ease: "easeIn" as const } }),
   };
+
+  // Step-level validation
+  const nameValid = firstName.trim().length > 0;
+  const addressValid = street.trim().length > 0 && city.trim().length > 0 && state.trim().length > 0 && zip.trim().length === 5;
 
   return (
     <>
@@ -118,7 +172,7 @@ export default function OnboardingOverlay({
             <div className="w-10 h-1 bg-gs-border rounded-full" />
           </div>
 
-          {/* X close button */}
+          {/* Header bar */}
           <div className="flex items-center justify-between px-5 pt-4 pb-2">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-gs-red flex items-center justify-center">
@@ -138,8 +192,10 @@ export default function OnboardingOverlay({
           </div>
 
           {/* Content area */}
-          <div className="px-6 pb-8 pt-2 min-h-[280px] flex flex-col">
+          <div className="px-6 pb-8 pt-2 min-h-[320px] flex flex-col">
             <AnimatePresence mode="wait" custom={direction}>
+
+              {/* ── Step: Name ─────────────────────────────────────────────── */}
               {step === "name" && (
                 <motion.div
                   key="name"
@@ -152,29 +208,52 @@ export default function OnboardingOverlay({
                 >
                   <div className="mb-2">
                     <p className="text-xs text-gs-red font-bold uppercase tracking-widest mb-3">
-                      Almost there — just 2 quick things
+                      Almost there — a few quick things
                     </p>
                     <h2 className="text-2xl font-black text-gs-dark mb-6">
-                      What should we call you?
+                      What&apos;s your name?
                     </h2>
-                    <input
-                      autoFocus
-                      type="text"
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && firstName.trim()) go("address", 1);
-                      }}
-                      placeholder="First name"
-                      className={inputCls}
-                      maxLength={50}
-                    />
+                    <div className="space-y-5">
+                      <div>
+                        <label className={labelCls}>First name</label>
+                        <input
+                          autoFocus
+                          type="text"
+                          value={firstName}
+                          onChange={(e) => setFirstName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && firstName.trim()) {
+                              const el = document.getElementById("overlay-last-name");
+                              el?.focus();
+                            }
+                          }}
+                          placeholder="Jane"
+                          className={inputCls}
+                          maxLength={50}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Last name</label>
+                        <input
+                          id="overlay-last-name"
+                          type="text"
+                          value={lastName}
+                          onChange={(e) => setLastName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && nameValid) go("address", 1);
+                          }}
+                          placeholder="Smith"
+                          className={inputCls}
+                          maxLength={50}
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <div className="mt-auto pt-6">
                     <button
                       onClick={() => go("address", 1)}
-                      disabled={!firstName.trim()}
+                      disabled={!nameValid}
                       className="w-full bg-gs-dark text-white font-bold py-3.5 rounded-2xl disabled:opacity-30 disabled:pointer-events-none hover:bg-gs-dark/90 active:scale-95 transition-all tap-none"
                     >
                       Continue →
@@ -189,6 +268,7 @@ export default function OnboardingOverlay({
                 </motion.div>
               )}
 
+              {/* ── Step: Address ──────────────────────────────────────────── */}
               {step === "address" && (
                 <motion.div
                   key="address"
@@ -209,26 +289,116 @@ export default function OnboardingOverlay({
                     <h2 className="text-2xl font-black text-gs-dark mb-2">
                       What&apos;s your address?
                     </h2>
-                    <p className="text-gs-medium text-sm mb-6">
-                      We&apos;ll confirm your neighborhood is{" "}
-                      <span className="font-semibold text-gs-dark">{defaultNeighborhoodName}</span>.
+                    <p className="text-gs-medium text-sm mb-5">
+                      We&apos;ll use your ZIP to confirm your neighborhood.
                     </p>
-                    <input
-                      autoFocus
-                      type="text"
-                      value={address}
-                      onChange={(e) => setAddress(e.target.value)}
-                      placeholder="123 Oak Lane, Austin TX 78660"
-                      className={inputCls}
-                      autoComplete="street-address"
-                    />
+                    <div className="space-y-4">
+                      <div>
+                        <label className={labelCls}>Street address</label>
+                        <input
+                          autoFocus
+                          type="text"
+                          value={street}
+                          onChange={(e) => setStreet(e.target.value)}
+                          placeholder="123 Oak Lane"
+                          className={inputCls}
+                          autoComplete="address-line1"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className={labelCls}>City</label>
+                          <input
+                            type="text"
+                            value={city}
+                            onChange={(e) => setCity(e.target.value)}
+                            placeholder="Austin"
+                            className={inputCls}
+                            autoComplete="address-level2"
+                          />
+                        </div>
+                        <div>
+                          <label className={labelCls}>State</label>
+                          <input
+                            type="text"
+                            value={state}
+                            onChange={(e) => setState(e.target.value.toUpperCase().slice(0, 2))}
+                            placeholder="TX"
+                            className={inputCls}
+                            maxLength={2}
+                            autoComplete="address-level1"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className={labelCls}>ZIP code</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={zip}
+                          onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))}
+                          placeholder="78660"
+                          className={inputCls}
+                          maxLength={5}
+                          autoComplete="postal-code"
+                        />
+                        {zip.length === 5 && (
+                          <p className={`text-xs mt-1 ${zipMatched ? "text-green-600" : "text-gs-medium"}`}>
+                            {zipMatched ? "✓ Neighborhood detected" : "ZIP not found — you'll confirm your neighborhood next"}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
 
-                    {/* Optional neighborhood override */}
-                    {neighborhoods.length > 1 && (
-                      <div className="mt-6">
-                        <label className="text-xs font-semibold text-gs-medium uppercase tracking-wider mb-2 block">
-                          Confirm your neighborhood
-                        </label>
+                  <div className="mt-auto pt-6">
+                    <button
+                      onClick={() => go("neighborhood", 1)}
+                      disabled={!addressValid}
+                      className="w-full bg-gs-dark text-white font-bold py-3.5 rounded-2xl disabled:opacity-30 disabled:pointer-events-none hover:bg-gs-dark/90 active:scale-95 transition-all tap-none"
+                    >
+                      Continue →
+                    </button>
+                    <button
+                      onClick={onDismiss}
+                      className="w-full mt-2 text-xs text-gs-medium text-center tap-none"
+                    >
+                      Skip and read the article
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* ── Step: Neighborhood confirm ─────────────────────────────── */}
+              {step === "neighborhood" && (
+                <motion.div
+                  key="neighborhood"
+                  custom={direction}
+                  variants={slideVariants}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  className="flex flex-col flex-1"
+                >
+                  <div className="mb-2">
+                    <button
+                      onClick={() => go("address", -1)}
+                      className="text-xs text-gs-medium mb-4 tap-none flex items-center gap-1"
+                    >
+                      ← Back
+                    </button>
+                    <h2 className="text-2xl font-black text-gs-dark mb-2">
+                      Confirm your neighborhood
+                    </h2>
+                    <p className="text-gs-medium text-sm mb-5">
+                      {zipMatched
+                        ? "We detected this from your ZIP — does it look right?"
+                        : "We couldn't auto-detect your neighborhood. Please select it below."}
+                    </p>
+
+                    {neighborhoods.length > 0 && (
+                      <div>
+                        <label className={labelCls}>Neighborhood</label>
                         <select
                           value={selectedNeighborhoodId}
                           onChange={(e) => setSelectedNeighborhoodId(e.target.value)}
@@ -251,7 +421,7 @@ export default function OnboardingOverlay({
                   <div className="mt-auto pt-6">
                     <button
                       onClick={handleSave}
-                      disabled={loading}
+                      disabled={loading || !selectedNeighborhoodId}
                       className="w-full bg-gs-red text-white font-bold py-3.5 rounded-2xl disabled:opacity-40 disabled:pointer-events-none hover:bg-gs-red-dark active:scale-95 transition-all tap-none shadow-lg shadow-gs-red/20"
                     >
                       {loading ? "Saving…" : "Done — read the full article 🎉"}
@@ -266,6 +436,7 @@ export default function OnboardingOverlay({
                 </motion.div>
               )}
 
+              {/* ── Step: Done ─────────────────────────────────────────────── */}
               {step === "done" && (
                 <motion.div
                   key="done"
@@ -293,6 +464,7 @@ export default function OnboardingOverlay({
                   </p>
                 </motion.div>
               )}
+
             </AnimatePresence>
           </div>
         </div>

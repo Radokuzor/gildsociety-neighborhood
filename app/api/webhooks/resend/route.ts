@@ -33,16 +33,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const eventTypeMap: Record<string, "sent" | "opened" | "clicked"> = {
+  const eventTypeMap: Record<string, "sent" | "delivered" | "opened" | "clicked"> = {
     "email.sent": "sent",
-    "email.delivered": "sent",
+    "email.delivered": "delivered",   // distinct from "sent" — confirmed inbox delivery
     "email.opened": "opened",
     "email.clicked": "clicked",
   };
 
   const eventType = eventTypeMap[payload.type];
   if (!eventType) {
-    // Ignore bounces etc for now
+    // Ignore bounces, complaints etc for now
     return NextResponse.json({ ok: true });
   }
 
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  const supabase = await createServiceClient();
+  const supabase = createServiceClient();
 
   // Insert email event
   await supabase.from("email_events").insert([

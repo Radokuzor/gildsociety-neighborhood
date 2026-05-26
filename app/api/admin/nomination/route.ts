@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
   const id = request.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  const supabase = await createServiceClient();
+  const supabase = createServiceClient();
   const { error } = await supabase
     .from("nominations")
     .update({ selected: true })

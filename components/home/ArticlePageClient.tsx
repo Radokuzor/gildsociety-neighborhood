@@ -39,8 +39,8 @@ export default function ArticlePageClient({
   const [showEmailWall, setShowEmailWall] = useState(false);
   const [hasFullAccess, setHasFullAccess] = useState(false);
 
-  // Onboarding overlay
-  const [showOnboarding, setShowOnboarding] = useState(initialShowOnboarding);
+  // Onboarding overlay — only show post-magic-link (requires being logged in)
+  const [showOnboarding, setShowOnboarding] = useState(initialShowOnboarding && isLoggedIn);
 
   // Email submitted — waiting for magic link click
   const [emailSubmitted, setEmailSubmitted] = useState(false);
@@ -87,6 +87,13 @@ export default function ArticlePageClient({
     }
   }, [hasFullAccess, emailSubmitted]);
 
+  // ── Sign Up button in header: same as hitting the paywall ────────────────
+  const handleSignUpClick = useCallback(() => {
+    if (!hasFullAccess && !isLoggedIn) {
+      setShowEmailWall(true);
+    }
+  }, [hasFullAccess, isLoggedIn]);
+
   // ── Email wall: user submitted email ────────────────────────────────────────
   const handleEmailSubmit = useCallback((email: string) => {
     // Save neighborhood for analytics even without full sign-up
@@ -130,6 +137,7 @@ export default function ArticlePageClient({
         allNeighborhoods={allNeighborhoods}
         onNeighborhoodChange={switchNeighborhood}
         isLoggedIn={isLoggedIn}
+        onSignUp={handleSignUpClick}
       />
 
       {/* Article body */}
@@ -165,14 +173,10 @@ export default function ArticlePageClient({
         )}
       </AnimatePresence>
 
-      {/* Email submitted state — waiting for link */}
+      {/* Email submitted state — waiting for link (dismiss only closes banner, no access granted) */}
       <AnimatePresence>
         {emailSubmitted && !showOnboarding && (
-          <MagicLinkSentBanner onDismiss={() => {
-            setEmailSubmitted(false);
-            setHasFullAccess(true);
-            setFullAccessCookie();
-          }} />
+          <MagicLinkSentBanner onDismiss={() => setEmailSubmitted(false)} />
         )}
       </AnimatePresence>
     </div>
@@ -200,8 +204,9 @@ function MagicLinkSentBanner({ onDismiss }: { onDismiss: () => void }) {
         <button
           onClick={onDismiss}
           className="text-white/60 hover:text-white text-sm font-semibold"
+          aria-label="Dismiss"
         >
-          Read now →
+          ✕
         </button>
       </div>
     </motion.div>

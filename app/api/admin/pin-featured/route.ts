@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     issueId: string | null;
   };
 
-  const supabase = await createServiceClient();
+  const supabase = createServiceClient();
 
   const { error } = await supabase
     .from("neighborhoods")
@@ -41,7 +41,7 @@ export async function PUT(request: NextRequest) {
   }
 
   const { slug } = (await request.json()) as { slug: string };
-  const supabase = await createServiceClient();
+  const supabase = createServiceClient();
 
   const { error } = await supabase
     .from("app_settings")
