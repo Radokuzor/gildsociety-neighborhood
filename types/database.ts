@@ -90,6 +90,7 @@ export interface Database {
         Row: {
           id: string;
           user_id: string;
+          email: string | null;
           neighborhood_id: string;
           first_name: string | null;
           last_name: string | null;
@@ -99,7 +100,8 @@ export interface Database {
         Insert: {
           id?: string;
           user_id: string;
-          neighborhood_id: string;
+          email?: string | null;
+          neighborhood_id?: string;
           first_name?: string | null;
           last_name?: string | null;
           address?: string | null;
@@ -108,6 +110,7 @@ export interface Database {
         Update: {
           id?: string;
           user_id?: string;
+          email?: string | null;
           neighborhood_id?: string;
           first_name?: string | null;
           last_name?: string | null;
