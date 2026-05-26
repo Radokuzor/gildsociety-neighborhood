@@ -80,11 +80,15 @@ export default function ArticlePageClient({
     router.replace(`/?n=${hood.slug}`, { scroll: false });
   }, [router]);
 
-  // ── Paywall trigger (called from ArticleContent when 40% reached) ─────────
-  const handlePaywallReached = useCallback(() => {
-    if (!hasFullAccess && !emailSubmitted) {
+  // ── Paywall trigger: show email wall after 30 seconds on page ────────────
+  useEffect(() => {
+    if (hasFullAccess || emailSubmitted) return;
+
+    const timer = setTimeout(() => {
       setShowEmailWall(true);
-    }
+    }, 30_000);
+
+    return () => clearTimeout(timer);
   }, [hasFullAccess, emailSubmitted]);
 
   // ── Sign Up button in header: same as hitting the paywall ────────────────
@@ -146,7 +150,6 @@ export default function ArticlePageClient({
         issue={featuredIssue}
         isLoading={isLoadingArticle}
         hasFullAccess={hasFullAccess}
-        onPaywallReached={handlePaywallReached}
       />
 
       {/* Email wall modal */}

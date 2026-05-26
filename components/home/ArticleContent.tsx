@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import type { Database } from "@/types/database";
 
@@ -28,7 +28,6 @@ interface Props {
   issue: NewsletterIssue | null;
   isLoading: boolean;
   hasFullAccess: boolean;
-  onPaywallReached: () => void;
 }
 
 export default function ArticleContent({
@@ -36,33 +35,7 @@ export default function ArticleContent({
   issue,
   isLoading,
   hasFullAccess,
-  onPaywallReached,
 }: Props) {
-  const paywallMarkerRef = useRef<HTMLDivElement>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const triggeredRef = useRef(false);
-
-  // ── IntersectionObserver: fires when reader hits the 40% mark ────────────
-  useEffect(() => {
-    if (hasFullAccess) return;
-    triggeredRef.current = false;
-
-    const marker = paywallMarkerRef.current;
-    if (!marker) return;
-
-    observerRef.current = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !triggeredRef.current) {
-          triggeredRef.current = true;
-          onPaywallReached();
-        }
-      },
-      { threshold: 0, rootMargin: "0px 0px -20% 0px" }
-    );
-
-    observerRef.current.observe(marker);
-    return () => observerRef.current?.disconnect();
-  }, [hasFullAccess, onPaywallReached, issue?.id]);
 
   if (isLoading) {
     return <ArticleSkeleton />;
@@ -87,7 +60,7 @@ export default function ArticleContent({
 
   // ── Legacy format ──────────────────────────────────────────────────────────
   if (!isNewFormat) {
-    return <LegacyArticleContent content={content} neighborhood={neighborhood} hasFullAccess={hasFullAccess} onPaywallReached={onPaywallReached} paywallMarkerRef={paywallMarkerRef} />;
+    return <LegacyArticleContent content={content} neighborhood={neighborhood} hasFullAccess={hasFullAccess} />;
   }
 
   // ── New format ─────────────────────────────────────────────────────────────
@@ -128,9 +101,6 @@ export default function ArticleContent({
           </div>
         </motion.section>
       )}
-
-      {/* ── PAYWALL MARKER ─────────────────────────────────────────────────── */}
-      <div ref={paywallMarkerRef} aria-hidden="true" />
 
       {/* ── BELOW PAYWALL ──────────────────────────────────────────────────── */}
       <div
@@ -265,17 +235,11 @@ function LegacyArticleContent({
   content,
   neighborhood,
   hasFullAccess,
-  onPaywallReached,
-  paywallMarkerRef,
 }: {
   content: NewsletterContent;
   neighborhood: { name: string };
   hasFullAccess: boolean;
-  onPaywallReached: () => void;
-  paywallMarkerRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  // silence unused warning
-  void onPaywallReached;
   return (
     <article className="max-w-2xl mx-auto px-4 py-6 pb-24">
       {content.top_news && content.top_news.length > 0 && (
@@ -301,8 +265,6 @@ function LegacyArticleContent({
           </div>
         </motion.section>
       )}
-
-      <div ref={paywallMarkerRef} aria-hidden="true" />
 
       <div
         className={`transition-all duration-300 ${!hasFullAccess ? "blur-sm pointer-events-none select-none" : ""}`}
