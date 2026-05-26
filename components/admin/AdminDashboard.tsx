@@ -226,7 +226,7 @@ export default function AdminDashboard({
         credentials: "same-origin",
         body: JSON.stringify({ issueId }),
       });
-      let data: { sent?: number; failed?: number; status?: string; error?: string; message?: string } = {};
+      let data: { sent?: number; failed?: number; total?: number; status?: string; error?: string; message?: string } = {};
       try {
         data = await res.json() as typeof data;
       } catch {

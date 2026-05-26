@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import type { Json } from "@/types/database";
 
 export async function POST(request: NextRequest) {
   const adminToken = request.cookies.get("admin_token")?.value;
@@ -17,7 +18,7 @@ export async function POST(request: NextRequest) {
     issueId: string;
     subject: string;
     previewText: string;
-    content: unknown;
+    content: Json;
   };
 
   if (!issueId) {
