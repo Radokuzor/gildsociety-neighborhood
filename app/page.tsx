@@ -98,31 +98,9 @@ export default async function HomePage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  // ── 6. If logged in and returning from magic link, check onboarding status ─
-  // Show the overlay only when the subscriber record is missing or incomplete.
-  // Only select columns that are guaranteed to exist (first_name, address) —
-  // last_name may not exist yet if migration 003 hasn't been applied.
-  let needsOnboarding = false;
-  if (user && params.show === "onboarding") {
-    const { data: subscriber, error: subQueryError } = await supabase
-      .from("subscribers")
-      .select("first_name, address")
-      .eq("user_id", user.id)
-      .single();
-
-    if (subQueryError && subQueryError.code !== "PGRST116") {
-      // PGRST116 = "no rows" — that's expected and means onboarding is needed.
-      // Any other error: treat as "needs onboarding" (safe default).
-      needsOnboarding = true;
-    } else {
-      // Needs onboarding if no record at all, or name/address haven't been filled in
-      const isComplete =
-        subscriber &&
-        subscriber.first_name?.trim() &&
-        subscriber.address?.trim();
-      needsOnboarding = !isComplete;
-    }
-  }
+  // ── 6. Onboarding is disabled — users land directly on the newsletter ──────
+  // Re-enable by restoring the subscriber-completeness check here.
+  const needsOnboarding = false;
 
   return (
     <ArticlePageClient
