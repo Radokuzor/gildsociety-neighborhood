@@ -80,12 +80,12 @@ export default function ArticlePageClient({
     router.replace(`/?n=${hood.slug}`, { scroll: false });
   }, [router]);
 
-  // ── Paywall trigger: disabled — re-enable by restoring the setTimeout ─────
-  // useEffect(() => {
-  //   if (hasFullAccess || emailSubmitted) return;
-  //   const timer = setTimeout(() => setShowEmailWall(true), 30_000);
-  //   return () => clearTimeout(timer);
-  // }, [hasFullAccess, emailSubmitted]);
+  // ── Paywall trigger: show email wall after 20 seconds ───────────────────
+  useEffect(() => {
+    if (hasFullAccess || emailSubmitted) return;
+    const timer = setTimeout(() => setShowEmailWall(true), 20_000);
+    return () => clearTimeout(timer);
+  }, [hasFullAccess, emailSubmitted]);
 
   // ── Sign Up button in header: same as hitting the paywall ────────────────
   const handleSignUpClick = useCallback(() => {

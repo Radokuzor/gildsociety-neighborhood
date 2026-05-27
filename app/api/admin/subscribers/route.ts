@@ -52,6 +52,41 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ subscribers: enriched });
 }
 
+// PATCH /api/admin/subscribers — move subscriber to a different neighborhood
+// Body: { id: string, neighborhoodId: string }
+export async function PATCH(request: NextRequest) {
+  if (!isAuthorized(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  let body: { id?: string; neighborhoodId?: string };
+  try {
+    body = await request.json() as { id?: string; neighborhoodId?: string };
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const { id, neighborhoodId } = body;
+  if (!id || !neighborhoodId) {
+    return NextResponse.json({ error: "id and neighborhoodId are required" }, { status: 400 });
+  }
+
+  const supabase = createServiceClient();
+
+  const { data, error } = await supabase
+    .from("subscribers")
+    .update({ neighborhood_id: neighborhoodId })
+    .eq("id", id)
+    .select("id, neighborhood_id")
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ subscriber: data });
+}
+
 // DELETE /api/admin/subscribers?id=xxx
 export async function DELETE(request: NextRequest) {
   if (!isAuthorized(request)) {

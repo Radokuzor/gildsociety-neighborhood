@@ -33,6 +33,21 @@ type SubscriberRow = {
   created_at: string;
 };
 
+type UserRow = {
+  user_id: string;
+  email: string | null;
+  auth_created_at: string;
+  last_sign_in: string | null;
+  subscriber: {
+    id: string;
+    neighborhood_id: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    email: string | null;
+    created_at: string;
+  } | null;
+};
+
 // ── Advanced seed form (collapsed by default) ─────────────────────────────────
 interface AdvancedSeeds {
   localNotes: string;        // Anything NewsAPI missed — passed to Claude as adminNotes
@@ -95,6 +110,27 @@ export default function AdminDashboard({
   const [loadingSubs, setLoadingSubs] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ subscriberId: string; email: string | null; neighborhoodName: string } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [moveConfirm, setMoveConfirm] = useState<{ subscriberId: string; email: string | null; currentNeighborhoodId: string } | null>(null);
+  const [moveTarget, setMoveTarget] = useState<string>("");
+  const [movingId, setMovingId] = useState<string | null>(null);
+
+  // ── All-users state ───────────────────────────────────────────────────────────
+  const [allUsers, setAllUsers] = useState<UserRow[] | null>(null);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+  const [assignModal, setAssignModal] = useState<{ user: UserRow } | null>(null);
+  const [assignTarget, setAssignTarget] = useState<string>("");
+  const [assigningUserId, setAssigningUserId] = useState<string | null>(null);
+
+  // ── Trial send state ──────────────────────────────────────────────────────────
+  const [trialIssue, setTrialIssue] = useState<AdminIssue | null>(null);
+  const [trialSubscribers, setTrialSubscribers] = useState<SubscriberRow[]>([]);
+  const [trialLoading, setTrialLoading] = useState(false);
+  const [trialSending, setTrialSending] = useState(false);
+  const [trialSelectedEmail, setTrialSelectedEmail] = useState("");
+  const [trialSelectedName, setTrialSelectedName] = useState("");
+  const [trialSearchQuery, setTrialSearchQuery] = useState("");
+  const [trialDropdownOpen, setTrialDropdownOpen] = useState(false);
 
   // ── Neighborhood delete state ─────────────────────────────────────────────────
   const [deleteHoodConfirm, setDeleteHoodConfirm] = useState<{
@@ -115,6 +151,59 @@ export default function AdminDashboard({
   const [zipError, setZipError] = useState<string | null>(null);
 
   useEffect(() => { setLocalIssues(issues); }, [issues]);
+
+  // Load all users when the subscribers tab is opened
+  useEffect(() => {
+    if (tab === "subscribers" && allUsers === null && !loadingUsers) {
+      void loadAllUsers();
+    }
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadAllUsers() {
+    setLoadingUsers(true);
+    try {
+      const res = await fetch("/api/admin/users", { credentials: "same-origin" });
+      const data = await res.json() as { users?: UserRow[]; error?: string };
+      if (res.ok) setAllUsers(data.users ?? []);
+      else showToast(data.error ?? "Failed to load users");
+    } catch {
+      showToast("Failed to load users");
+    } finally {
+      setLoadingUsers(false);
+    }
+  }
+
+  async function assignUser(userId: string, neighborhoodId: string) {
+    setAssigningUserId(userId);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ userId, neighborhoodId }),
+      });
+      const data = await res.json() as { subscriber?: { neighborhood_id: string | null; first_name: string | null; last_name: string | null; email: string | null; created_at: string; id: string }; error?: string };
+      if (res.ok && data.subscriber) {
+        const hoodName = neighborhoods.find((n) => n.id === neighborhoodId)?.name ?? "neighborhood";
+        setAllUsers((prev) =>
+          (prev ?? []).map((u) =>
+            u.user_id === userId
+              ? { ...u, subscriber: { ...data.subscriber!, id: data.subscriber!.id } }
+              : u
+          )
+        );
+        showToast(`Assigned to ${hoodName} ✓`);
+        setAssignModal(null);
+        setAssignTarget("");
+      } else {
+        showToast(data.error ?? "Failed to assign");
+      }
+    } catch {
+      showToast("Request failed");
+    } finally {
+      setAssigningUserId(null);
+    }
+  }
 
   function showToast(msg: string) {
     setToast(msg);
@@ -257,6 +346,53 @@ export default function AdminDashboard({
       showToast("Send failed");
     } finally {
       setSending(null);
+    }
+  }
+
+  async function openTrialSend(issue: AdminIssue) {
+    setTrialIssue(issue);
+    setTrialSelectedEmail("");
+    setTrialSelectedName("");
+    setTrialSearchQuery("");
+    setTrialDropdownOpen(false);
+    setTrialLoading(true);
+    try {
+      const res = await fetch(
+        `/api/admin/subscribers?neighborhoodId=${issue.neighborhood_id}`,
+        { credentials: "same-origin" }
+      );
+      const data = await res.json() as { subscribers?: SubscriberRow[] };
+      if (res.ok) setTrialSubscribers(data.subscribers ?? []);
+    } finally {
+      setTrialLoading(false);
+    }
+  }
+
+  async function sendTrial() {
+    if (!trialIssue || !trialSelectedEmail) return;
+    setTrialSending(true);
+    try {
+      const res = await fetch("/api/admin/send-trial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          issueId: trialIssue.id,
+          email: trialSelectedEmail,
+          firstName: trialSelectedName || undefined,
+        }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string };
+      if (res.ok) {
+        showToast(`Trial sent to ${trialSelectedEmail} ✓`);
+        setTrialIssue(null);
+      } else {
+        showToast(data.error ?? "Trial send failed");
+      }
+    } catch {
+      showToast("Trial send failed");
+    } finally {
+      setTrialSending(false);
     }
   }
 
@@ -442,6 +578,49 @@ export default function AdminDashboard({
     }
   }
 
+  async function confirmMoveSubscriber() {
+    if (!moveConfirm || !moveTarget) return;
+    setMovingId(moveConfirm.subscriberId);
+    try {
+      const res = await fetch("/api/admin/subscribers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ id: moveConfirm.subscriberId, neighborhoodId: moveTarget }),
+      });
+      if (res.ok) {
+        const destName = neighborhoods.find((n) => n.id === moveTarget)?.name ?? "new neighborhood";
+        // Remove from old hood list and add to new hood list in local state
+        setSubsByHood((prev) => {
+          const updated = { ...prev };
+          // Find the subscriber record across all loaded hoods
+          let movedSub: SubscriberRow | undefined;
+          for (const hoodId in updated) {
+            const found = updated[hoodId].find((s) => s.id === moveConfirm.subscriberId);
+            if (found) {
+              movedSub = { ...found, neighborhood_id: moveTarget };
+              updated[hoodId] = updated[hoodId].filter((s) => s.id !== moveConfirm.subscriberId);
+            }
+          }
+          // Append to destination if already loaded
+          if (movedSub && updated[moveTarget]) {
+            updated[moveTarget] = [movedSub, ...updated[moveTarget]];
+          }
+          return updated;
+        });
+        showToast(`${moveConfirm.email ?? "Subscriber"} moved to ${destName}`);
+        setMoveConfirm(null);
+        setMoveTarget("");
+      } else {
+        showToast("Failed to move subscriber");
+      }
+    } catch {
+      showToast("Request failed");
+    } finally {
+      setMovingId(null);
+    }
+  }
+
   const loadZips = useCallback(async (neighborhoodId: string) => {
     setLoadingZips(neighborhoodId);
     try {
@@ -513,10 +692,11 @@ export default function AdminDashboard({
     return subCounts.filter((s) => s.neighborhood_id === neighborhoodId).length;
   }
 
+  const unassignedCount = (allUsers ?? []).filter((u) => !u.subscriber?.neighborhood_id).length;
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: "newsletters", label: "Newsletters", count: localIssues.filter((i) => i.status === "draft").length || undefined },
     { id: "analytics", label: "Analytics" },
-    { id: "subscribers", label: "Subscribers" },
+    { id: "subscribers", label: "Subscribers", count: unassignedCount || undefined },
     { id: "nominations", label: "Nominations", count: nominations.length || undefined },
     { id: "settings", label: "Settings" },
   ];
@@ -695,10 +875,16 @@ export default function AdminDashboard({
                           Preview
                         </button>
                         {issue.status === "draft" && (
-                          <button onClick={() => approveAndSend(issue.id)} disabled={sending === issue.id}
-                            className="px-3 py-1.5 text-xs font-bold bg-gs-red text-white rounded-xl hover:bg-gs-red/90 transition-colors disabled:opacity-50 tap-none">
-                            {sending === issue.id ? "Sending…" : "Approve & Send"}
-                          </button>
+                          <>
+                            <button onClick={() => void openTrialSend(issue)} disabled={sending === issue.id}
+                              className="px-3 py-1.5 text-xs font-semibold border border-gs-border rounded-xl hover:border-gs-dark transition-colors disabled:opacity-50 tap-none">
+                              Send Trial
+                            </button>
+                            <button onClick={() => approveAndSend(issue.id)} disabled={sending === issue.id}
+                              className="px-3 py-1.5 text-xs font-bold bg-gs-red text-white rounded-xl hover:bg-gs-red/90 transition-colors disabled:opacity-50 tap-none">
+                              {sending === issue.id ? "Sending…" : "Approve & Send"}
+                            </button>
+                          </>
                         )}
                         {issue.status === "sent" && (
                           <button onClick={() => void pinFeatured(issue.neighborhood_id, issue.id)}
@@ -758,126 +944,133 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* ── Subscribers ───────────────────────────────────────────────────────── */}
-      {tab === "subscribers" && (
-        <div className="space-y-3">
-          <div className="bg-white rounded-3xl border border-gs-border p-5">
-            <p className="font-black text-gs-dark mb-1">Subscribers by neighborhood</p>
-            <p className="text-sm text-gs-medium">Click a neighborhood to view its subscribers. Delete a subscriber so they can re-sign up.</p>
-          </div>
+      {/* ── Subscribers (all users) ────────────────────────────────────────────── */}
+      {tab === "subscribers" && (() => {
+        const unassignedCount = (allUsers ?? []).filter((u) => !u.subscriber?.neighborhood_id).length;
+        const filtered = (allUsers ?? []).filter((u) => {
+          if (!userSearch.trim()) return true;
+          const q = userSearch.toLowerCase();
+          const name = [u.subscriber?.first_name, u.subscriber?.last_name].filter(Boolean).join(" ").toLowerCase();
+          return (u.email ?? "").toLowerCase().includes(q) || name.includes(q);
+        });
 
-          {neighborhoods.length === 0 ? (
-            <div className="bg-white rounded-3xl border border-gs-border p-8 text-center">
-              <p className="text-4xl mb-3">🏘️</p>
-              <p className="font-bold text-gs-dark">No neighborhoods yet</p>
+        return (
+          <div className="space-y-3">
+            {/* Header row */}
+            <div className="bg-white rounded-3xl border border-gs-border p-5">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <p className="font-black text-gs-dark mb-0.5">All users</p>
+                  <p className="text-sm text-gs-medium">
+                    {allUsers === null ? "Loading…" : `${allUsers.length} total`}
+                    {unassignedCount > 0 && (
+                      <span className="ml-2 inline-flex items-center gap-1 bg-amber-100 text-amber-700 text-xs font-bold px-2 py-0.5 rounded-full">
+                        ⚠ {unassignedCount} unassigned
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setAllUsers(null); void loadAllUsers(); }}
+                  disabled={loadingUsers}
+                  className="text-xs font-semibold text-gs-medium hover:text-gs-dark border border-gs-border rounded-xl px-3 py-1.5 transition-colors disabled:opacity-40 tap-none"
+                >
+                  {loadingUsers ? "Refreshing…" : "↻ Refresh"}
+                </button>
+              </div>
+
+              {/* Search */}
+              <div className="mt-3">
+                <input
+                  type="text"
+                  placeholder="Search by email or name…"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  className="w-full border border-gs-border rounded-xl px-3 py-2 text-sm text-gs-dark placeholder:text-gs-light focus:outline-none focus:border-gs-red transition-colors"
+                />
+              </div>
             </div>
-          ) : (
-            <div className="bg-white rounded-3xl border border-gs-border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gs-border bg-gs-surface">
-                    <th className="text-left px-5 py-3 text-xs font-black uppercase tracking-wider text-gs-medium">Neighborhood</th>
-                    <th className="text-right px-5 py-3 text-xs font-black uppercase tracking-wider text-gs-medium">Subscribers</th>
-                    <th className="px-5 py-3 w-10" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {neighborhoods.map((hood, idx) => {
-                    const count = subCount(hood.id);
-                    const isExpanded = expandedSubHood === hood.id;
-                    const subs = subsByHood[hood.id] ?? [];
-                    const isLoading = loadingSubs === hood.id;
-                    return (
-                      <React.Fragment key={hood.id}>
+
+            {/* User list */}
+            {loadingUsers && allUsers === null ? (
+              <div className="bg-white rounded-3xl border border-gs-border p-10 flex items-center justify-center gap-2 text-gs-medium">
+                <Spinner /> Loading users…
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="bg-white rounded-3xl border border-gs-border p-8 text-center">
+                <p className="text-4xl mb-3">🔍</p>
+                <p className="font-bold text-gs-dark">{userSearch ? "No results" : "No users yet"}</p>
+              </div>
+            ) : (
+              <div className="bg-white rounded-3xl border border-gs-border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gs-border bg-gs-surface">
+                      <th className="text-left px-5 py-3 text-xs font-black uppercase tracking-wider text-gs-medium">User</th>
+                      <th className="text-left px-4 py-3 text-xs font-black uppercase tracking-wider text-gs-medium hidden sm:table-cell">Neighborhood</th>
+                      <th className="text-left px-4 py-3 text-xs font-black uppercase tracking-wider text-gs-medium hidden md:table-cell">Joined</th>
+                      <th className="px-5 py-3 w-24" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((user, idx) => {
+                      const hood = neighborhoods.find((n) => n.id === user.subscriber?.neighborhood_id);
+                      const name = [user.subscriber?.first_name, user.subscriber?.last_name].filter(Boolean).join(" ");
+                      const isUnassigned = !user.subscriber?.neighborhood_id;
+                      return (
                         <tr
-                          onClick={() => toggleSubHood(hood.id)}
-                          className={`cursor-pointer transition-colors ${isExpanded ? "bg-accent" : "hover:bg-gs-surface"} ${idx !== 0 ? "border-t border-gs-border" : ""}`}
+                          key={user.user_id}
+                          className={`${idx !== 0 ? "border-t border-gs-border" : ""} hover:bg-gs-surface/50 transition-colors`}
                         >
-                          <td className="px-5 py-4">
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-gs-dark">{hood.name}</span>
-                              <span className="text-xs text-gs-light">{hood.city}, {hood.state}</span>
-                              {!hood.active && <span className="text-xs bg-gs-surface text-gs-medium px-1.5 py-0.5 rounded-full font-semibold">Inactive</span>}
-                            </div>
+                          {/* Email + name */}
+                          <td className="px-5 py-3.5">
+                            <p className="font-mono text-xs text-gs-dark truncate max-w-[200px] sm:max-w-none">
+                              {user.email ?? <span className="text-gs-light italic">no email</span>}
+                            </p>
+                            {name && <p className="text-xs text-gs-medium mt-0.5">{name}</p>}
                           </td>
-                          <td className="px-5 py-4 text-right">
-                            <span className={`text-sm font-bold ${count > 0 ? "text-gs-dark" : "text-gs-light"}`}>{count}</span>
+
+                          {/* Neighborhood badge */}
+                          <td className="px-4 py-3.5 hidden sm:table-cell">
+                            {isUnassigned ? (
+                              <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+                                ⚠ Unassigned
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center bg-gs-surface text-gs-dark text-xs font-semibold px-2.5 py-1 rounded-full border border-gs-border">
+                                {hood?.name ?? "Unknown"}
+                              </span>
+                            )}
                           </td>
-                          <td className="px-5 py-4 text-center">
-                            <span className={`text-gs-light text-xs transition-transform inline-block ${isExpanded ? "rotate-180" : ""}`}>▼</span>
+
+                          {/* Joined date */}
+                          <td className="px-4 py-3.5 text-xs text-gs-light whitespace-nowrap hidden md:table-cell">
+                            {new Date(user.auth_created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="px-5 py-3.5 text-right">
+                            <button
+                              onClick={() => { setAssignTarget(user.subscriber?.neighborhood_id ?? ""); setAssignModal({ user }); }}
+                              className={`text-xs font-semibold border rounded-lg px-2.5 py-1 transition-colors tap-none ${
+                                isUnassigned
+                                  ? "bg-gs-dark text-white border-gs-dark hover:bg-gs-dark/90"
+                                  : "text-gs-medium border-gs-border hover:text-gs-dark hover:border-gs-dark"
+                              }`}
+                            >
+                              {isUnassigned ? "Assign →" : "Move"}
+                            </button>
                           </td>
                         </tr>
-
-                        {/* Accordion subscriber rows */}
-                        {isExpanded && (
-                          <tr key={`${hood.id}-subs`} className="border-t border-gs-red/10">
-                            <td colSpan={3} className="px-0 py-0">
-                              <div className="bg-accent border-b border-gs-red/10">
-                                {isLoading ? (
-                                  <div className="flex items-center gap-2 px-6 py-5 text-sm text-gs-medium">
-                                    <Spinner /> Loading subscribers…
-                                  </div>
-                                ) : subs.length === 0 ? (
-                                  <p className="px-6 py-5 text-sm text-gs-medium">No subscribers yet for {hood.name}.</p>
-                                ) : (
-                                  <div className="overflow-x-auto">
-                                    <table className="w-full text-sm">
-                                      <thead>
-                                        <tr className="border-b border-gs-red/10">
-                                          <th className="text-left px-6 py-2.5 text-xs font-black uppercase tracking-wider text-gs-medium">Email</th>
-                                          <th className="text-left px-4 py-2.5 text-xs font-black uppercase tracking-wider text-gs-medium hidden sm:table-cell">Name</th>
-                                          <th className="text-left px-4 py-2.5 text-xs font-black uppercase tracking-wider text-gs-medium">Subscribed</th>
-                                          <th className="px-6 py-2.5 w-20" />
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {subs.map((sub, subIdx) => (
-                                          <tr
-                                            key={sub.id}
-                                            className={`${subIdx !== 0 ? "border-t border-gs-red/10" : ""} hover:bg-white/50 transition-colors`}
-                                          >
-                                            <td className="px-6 py-3 font-mono text-xs text-gs-dark">
-                                              {sub.email ?? <span className="text-gs-light italic">no email</span>}
-                                            </td>
-                                            <td className="px-4 py-3 text-xs text-gs-medium hidden sm:table-cell">
-                                              {[sub.first_name, sub.last_name].filter(Boolean).join(" ") || <span className="text-gs-light">—</span>}
-                                            </td>
-                                            <td className="px-4 py-3 text-xs text-gs-light whitespace-nowrap">
-                                              {new Date(sub.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                                              <span className="ml-1 hidden sm:inline text-gs-light/70">
-                                                {new Date(sub.created_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-                                              </span>
-                                            </td>
-                                            <td className="px-6 py-3 text-right">
-                                              <button
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  setDeleteConfirm({ subscriberId: sub.id, email: sub.email, neighborhoodName: hood.name });
-                                                }}
-                                                className="text-xs font-semibold text-gs-light hover:text-red-500 border border-gs-border hover:border-red-300 rounded-lg px-2.5 py-1 transition-colors tap-none"
-                                              >
-                                                Delete
-                                              </button>
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Nominations ───────────────────────────────────────────────────────── */}
       {tab === "nominations" && (
@@ -1068,6 +1261,130 @@ export default function AdminDashboard({
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gs-dark text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-xl z-50 whitespace-nowrap">{toast}</div>
       )}
 
+      {/* Assign / Move user to neighborhood modal */}
+      {assignModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => !assigningUserId && setAssignModal(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="w-12 h-12 rounded-2xl bg-gs-surface flex items-center justify-center mb-4">
+              <span className="text-2xl">🏘️</span>
+            </div>
+            <p className="font-black text-gs-dark text-lg mb-0.5">
+              {assignModal.user.subscriber?.neighborhood_id ? "Move to neighborhood" : "Assign neighborhood"}
+            </p>
+            <p className="text-sm text-gs-medium mb-4 font-mono text-xs break-all">
+              {assignModal.user.email ?? "Unknown email"}
+            </p>
+
+            {/* Current neighborhood label */}
+            {assignModal.user.subscriber?.neighborhood_id && (
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xs text-gs-medium">Currently in:</span>
+                <span className="text-xs font-semibold text-gs-dark bg-gs-surface px-2 py-0.5 rounded-full border border-gs-border">
+                  {neighborhoods.find((n) => n.id === assignModal.user.subscriber?.neighborhood_id)?.name ?? "Unknown"}
+                </span>
+              </div>
+            )}
+
+            <label className="text-xs font-black uppercase tracking-wider text-gs-medium block mb-1.5">
+              {assignModal.user.subscriber?.neighborhood_id ? "Move to" : "Assign to"}
+            </label>
+            <div className="space-y-2 mb-5 max-h-64 overflow-y-auto pr-1">
+              {neighborhoods
+                .filter((n) => n.id !== assignModal.user.subscriber?.neighborhood_id)
+                .map((n) => (
+                  <button
+                    key={n.id}
+                    onClick={() => setAssignTarget(n.id)}
+                    className={`w-full text-left px-4 py-3 rounded-2xl border-2 transition-all tap-none ${
+                      assignTarget === n.id
+                        ? "border-gs-red bg-accent text-gs-red"
+                        : "border-gs-border text-gs-dark hover:border-gs-red/40"
+                    }`}
+                  >
+                    <p className="font-semibold text-sm">{n.name}</p>
+                    <p className="text-xs text-gs-medium">{n.city}, {n.state}</p>
+                  </button>
+                ))}
+              {neighborhoods.filter((n) => n.id !== assignModal.user.subscriber?.neighborhood_id).length === 0 && (
+                <p className="text-sm text-gs-medium py-2 text-center">No other neighborhoods exist yet.</p>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => assignTarget && void assignUser(assignModal.user.user_id, assignTarget)}
+                disabled={!assignTarget || !!assigningUserId}
+                className="flex-1 py-2.5 bg-gs-dark text-white text-sm font-bold rounded-xl hover:bg-gs-dark/90 transition-colors disabled:opacity-40 tap-none"
+              >
+                {assigningUserId === assignModal.user.user_id ? "Saving…" : assignModal.user.subscriber?.neighborhood_id ? "Move →" : "Assign →"}
+              </button>
+              <button
+                onClick={() => { setAssignModal(null); setAssignTarget(""); }}
+                disabled={!!assigningUserId}
+                className="flex-1 py-2.5 border border-gs-border text-sm font-semibold text-gs-dark rounded-xl hover:border-gs-dark transition-colors disabled:opacity-40 tap-none"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Move subscriber modal */}
+      {moveConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => !movingId && setMoveConfirm(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
+              <span className="text-2xl">🏘️</span>
+            </div>
+            <p className="font-black text-gs-dark text-lg mb-1">Move subscriber</p>
+            <p className="text-sm text-gs-medium mb-4">
+              <span className="font-semibold text-gs-dark font-mono">{moveConfirm.email ?? "This subscriber"}</span> will receive newsletters for the new neighborhood.
+            </p>
+
+            <label className="text-xs font-black uppercase tracking-wider text-gs-medium block mb-1.5">Move to</label>
+            <div className="space-y-2 mb-5">
+              {neighborhoods
+                .filter((n) => n.id !== moveConfirm.currentNeighborhoodId)
+                .map((n) => (
+                  <button
+                    key={n.id}
+                    onClick={() => setMoveTarget(n.id)}
+                    className={`w-full text-left px-4 py-3 rounded-2xl border-2 transition-all tap-none ${
+                      moveTarget === n.id
+                        ? "border-gs-red bg-accent text-gs-red"
+                        : "border-gs-border text-gs-dark hover:border-gs-red/40"
+                    }`}
+                  >
+                    <p className="font-semibold text-sm">{n.name}</p>
+                    <p className="text-xs text-gs-medium">{n.city}, {n.state}</p>
+                  </button>
+                ))}
+              {neighborhoods.filter((n) => n.id !== moveConfirm.currentNeighborhoodId).length === 0 && (
+                <p className="text-sm text-gs-medium py-2 text-center">No other neighborhoods exist yet.</p>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => void confirmMoveSubscriber()}
+                disabled={!moveTarget || !!movingId}
+                className="flex-1 py-2.5 bg-gs-dark text-white text-sm font-bold rounded-xl hover:bg-gs-dark/90 transition-colors disabled:opacity-40 tap-none"
+              >
+                {movingId ? "Moving…" : "Move subscriber →"}
+              </button>
+              <button
+                onClick={() => { setMoveConfirm(null); setMoveTarget(""); }}
+                disabled={!!movingId}
+                className="flex-1 py-2.5 border border-gs-border text-sm font-semibold text-gs-dark rounded-xl hover:border-gs-dark transition-colors disabled:opacity-40 tap-none"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete subscriber confirmation modal */}
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => !deletingId && setDeleteConfirm(null)}>
@@ -1154,6 +1471,80 @@ export default function AdminDashboard({
                 className="flex-1 py-2.5 border border-gs-border text-sm font-semibold text-gs-dark rounded-xl hover:border-gs-dark transition-colors disabled:opacity-40 tap-none"
               >
                 {deleteHoodConfirm.subCount > 0 ? "Close" : "Cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Trial send modal */}
+      {trialIssue && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+          onClick={() => !trialSending && setTrialIssue(null)}
+        >
+          <div
+            className="bg-white rounded-3xl shadow-2xl p-6 max-w-sm w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
+              <span className="text-2xl">✉️</span>
+            </div>
+            <p className="font-black text-gs-dark text-lg mb-1">Send trial newsletter</p>
+            <p className="text-sm text-gs-medium mb-1 truncate">
+              <span className="font-semibold text-gs-dark">{trialIssue.subject}</span>
+            </p>
+            <p className="text-xs text-gs-light mb-5">
+              Sends a one-off copy to a single subscriber. The issue stays as a draft and won&apos;t be marked sent.
+            </p>
+
+            <label className="text-xs font-black uppercase tracking-wider text-gs-medium block mb-1.5">
+              Send to
+            </label>
+
+            {trialLoading ? (
+              <div className="flex items-center gap-2 py-4 text-sm text-gs-medium">
+                <Spinner /> Loading subscribers…
+              </div>
+            ) : (
+              <SubscriberCombobox
+                subscribers={trialSubscribers}
+                searchQuery={trialSearchQuery}
+                onSearchChange={(q) => {
+                  setTrialSearchQuery(q);
+                  setTrialDropdownOpen(true);
+                  // Clear selection when user types a new query
+                  if (q !== trialSelectedEmail) {
+                    setTrialSelectedEmail("");
+                    setTrialSelectedName("");
+                  }
+                }}
+                dropdownOpen={trialDropdownOpen}
+                onDropdownOpenChange={setTrialDropdownOpen}
+                selectedEmail={trialSelectedEmail}
+                onSelect={(email, firstName) => {
+                  setTrialSelectedEmail(email);
+                  setTrialSelectedName(firstName ?? "");
+                  setTrialSearchQuery(email);
+                  setTrialDropdownOpen(false);
+                }}
+              />
+            )}
+
+            <div className="flex gap-3 mt-5">
+              <button
+                onClick={() => void sendTrial()}
+                disabled={!trialSelectedEmail || trialSending || trialLoading}
+                className="flex-1 py-2.5 bg-gs-dark text-white text-sm font-bold rounded-xl hover:bg-gs-dark/90 transition-colors disabled:opacity-40 tap-none"
+              >
+                {trialSending ? "Sending…" : "Send trial →"}
+              </button>
+              <button
+                onClick={() => setTrialIssue(null)}
+                disabled={trialSending}
+                className="flex-1 py-2.5 border border-gs-border text-sm font-semibold text-gs-dark rounded-xl hover:border-gs-dark transition-colors disabled:opacity-40 tap-none"
+              >
+                Cancel
               </button>
             </div>
           </div>
@@ -1382,6 +1773,122 @@ function TopicPickerPanel({
           <p className="text-xs text-gs-light">Select at least one article to generate</p>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Subscriber Combobox ───────────────────────────────────────────────────────
+function SubscriberCombobox({
+  subscribers,
+  searchQuery,
+  onSearchChange,
+  dropdownOpen,
+  onDropdownOpenChange,
+  selectedEmail,
+  onSelect,
+}: {
+  subscribers: SubscriberRow[];
+  searchQuery: string;
+  onSearchChange: (q: string) => void;
+  dropdownOpen: boolean;
+  onDropdownOpenChange: (open: boolean) => void;
+  selectedEmail: string;
+  onSelect: (email: string, firstName?: string) => void;
+}) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const filtered = React.useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return subscribers.slice(0, 30);
+    return subscribers
+      .filter((s) => {
+        const email = (s.email ?? "").toLowerCase();
+        const name = `${s.first_name ?? ""} ${s.last_name ?? ""}`.toLowerCase().trim();
+        return email.includes(q) || name.includes(q);
+      })
+      .slice(0, 30);
+  }, [subscribers, searchQuery]);
+
+  const isSelected = !!selectedEmail;
+
+  return (
+    <div className="relative">
+      <div className={`flex items-center gap-2 border-2 rounded-xl px-3 py-2 transition-colors ${
+        isSelected ? "border-gs-dark bg-gs-surface" : dropdownOpen ? "border-gs-red" : "border-gs-border"
+      }`}>
+        {isSelected && (
+          <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
+        )}
+        <input
+          ref={inputRef}
+          type="text"
+          value={searchQuery}
+          placeholder={subscribers.length === 0 ? "No subscribers in this neighborhood" : "Search by email or name…"}
+          disabled={subscribers.length === 0}
+          onChange={(e) => onSearchChange(e.target.value)}
+          onFocus={() => onDropdownOpenChange(true)}
+          onBlur={() => setTimeout(() => onDropdownOpenChange(false), 150)}
+          className="flex-1 min-w-0 text-sm text-gs-dark placeholder:text-gs-light bg-transparent outline-none"
+        />
+        {searchQuery && (
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              onSearchChange("");
+              onSelect("", undefined);
+              onDropdownOpenChange(true);
+              inputRef.current?.focus();
+            }}
+            className="flex-shrink-0 text-gs-light hover:text-gs-dark transition-colors tap-none"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      {/* Dropdown */}
+      {dropdownOpen && (
+        <div className="absolute z-10 top-full left-0 right-0 mt-1.5 bg-white border border-gs-border rounded-2xl shadow-xl overflow-hidden max-h-52 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="px-4 py-3 text-sm text-gs-medium text-center">
+              {searchQuery ? "No matches found" : "No subscribers"}
+            </p>
+          ) : (
+            <ul>
+              {filtered.map((sub, idx) => {
+                const displayName = [sub.first_name, sub.last_name].filter(Boolean).join(" ");
+                return (
+                  <li key={sub.id}>
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => onSelect(sub.email ?? "", sub.first_name ?? undefined)}
+                      className={`w-full text-left px-4 py-2.5 hover:bg-gs-surface transition-colors tap-none ${
+                        idx !== 0 ? "border-t border-gs-border/50" : ""
+                      } ${sub.email === selectedEmail ? "bg-accent" : ""}`}
+                    >
+                      <p className="text-sm font-semibold text-gs-dark truncate">
+                        {sub.email ?? <span className="text-gs-light italic">no email</span>}
+                      </p>
+                      {displayName && (
+                        <p className="text-xs text-gs-medium">{displayName}</p>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {selectedEmail && (
+        <p className="text-xs text-green-600 font-semibold mt-1.5 ml-1">✓ {selectedEmail} selected</p>
+      )}
+      {!selectedEmail && subscribers.length > 0 && (
+        <p className="text-xs text-gs-light mt-1.5 ml-1">{subscribers.length} subscriber{subscribers.length !== 1 ? "s" : ""} in this neighborhood</p>
+      )}
     </div>
   );
 }
